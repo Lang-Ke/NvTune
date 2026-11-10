@@ -22,8 +22,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 
 ## 📦 下载
 
-从 [Releases](../../releases) 下载 `NvTune-win-x64.zip`，或直接使用仓库内的
-[dist/NvTune-win-x64.zip](dist/NvTune-win-x64.zip)。解压后运行 `启动器.exe`。
+从 [Releases](../../releases) 下载 `NvTune-win-x64.zip`。解压后运行 `启动器.exe`。
 
 ### 系统要求
 
@@ -96,7 +95,6 @@ NvTune/
 │   │   ├── Theme.cs            界面配色
 │   │   └── Core/               NVAPI / NVML 交互、持久化、后台进程
 │   └── NvTune.Launcher/   启动器（net48，运行时检测 + 下载引导）
-├── dist/                  已编译的发布包
 └── NvTune.slnx            解决方案
 ```
 
