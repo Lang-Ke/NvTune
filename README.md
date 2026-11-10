@@ -2,7 +2,8 @@
 
 **NVIDIA GPU 降压 & 多点风扇曲线调节 — Windows 图形界面工具**
 
-![NvTune 界面](docs/screenshot.png)
+![Uploading 批注 2026-11-10 130014.png…]()
+
 
 NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心降压（电压上限 + 目标频率）
 和多点风扇曲线调节。配置一次，重启后自动生效，无需常驻大体积后台。
