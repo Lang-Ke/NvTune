@@ -12,6 +12,7 @@ internal sealed class FanCurveEditor : Control
     private readonly List<(int TempC, int Percent)> _points = new();
     private int? _dragIndex;
     private int? _hoverIndex;
+    private int? _selectedIndex;
     private int _currentTemp = -1;
 
     public FanCurveEditor()
@@ -20,12 +21,15 @@ internal sealed class FanCurveEditor : Control
         BackColor = Theme.PlotBackground;
         ForeColor = Theme.Text;
         SetStyle(ControlStyles.ResizeRedraw | ControlStyles.AllPaintingInWmPaint
-            | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint
+            | ControlStyles.Selectable, true);
+        TabStop = true;
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
         MouseUp += (_, _) => { _dragIndex = null; Invalidate(); };
         MouseDoubleClick += OnMouseDoubleClick;
         MouseLeave += (_, _) => { _hoverIndex = null; Invalidate(); };
+        Leave += (_, _) => { _selectedIndex = null; Invalidate(); };
     }
 
     public event EventHandler? PointsChanged;
@@ -43,6 +47,7 @@ internal sealed class FanCurveEditor : Control
     {
         _points.Clear();
         _points.AddRange(points.OrderBy(p => p.TempC).Take(MaxPoints));
+        _selectedIndex = null;
         Invalidate();
         PointsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -155,14 +160,22 @@ internal sealed class FanCurveEditor : Control
         {
             var (t, p) = _points[i];
             float x = XAtTemp(t), y = YAtPct(p);
-            bool active = _dragIndex == i || _hoverIndex == i;
+            bool selected = _selectedIndex == i;
+            bool active = _dragIndex == i || _hoverIndex == i || selected;
             float radius = active ? 7f * dpiScale : 6f * dpiScale;
-            using var halo = new SolidBrush(active ? Color.FromArgb(38, Theme.Curve) : Color.FromArgb(18, Theme.Curve));
+            using var halo = new SolidBrush(selected ? Color.FromArgb(56, Theme.Curve)
+                : active ? Color.FromArgb(38, Theme.Curve) : Color.FromArgb(18, Theme.Curve));
             g.FillEllipse(halo, x - radius - S(5), y - radius - S(5), (radius + S(5)) * 2, (radius + S(5)) * 2);
             using var center = new SolidBrush(active ? Theme.Curve : Theme.PlotBackground);
             using var ring = new Pen(Theme.Curve, 2.2f);
             g.FillEllipse(center, x - radius, y - radius, radius * 2, radius * 2);
             g.DrawEllipse(ring, x - radius, y - radius, radius * 2, radius * 2);
+            if (selected)
+            {
+                using var focusPen = new Pen(Theme.Marker, 1.6f) { DashStyle = DashStyle.Dot };
+                g.DrawEllipse(focusPen, x - radius - S(5), y - radius - S(5),
+                    (radius + S(5)) * 2, (radius + S(5)) * 2);
+            }
 
             string caption = $"{t}°  {p}%";
             var size = g.MeasureString(caption, labelFont);
@@ -193,7 +206,7 @@ internal sealed class FanCurveEditor : Control
 
         // The hint shares the row under the plot with the axis caption, so it is clipped to the
         // space left of that caption instead of running underneath it at large font scales.
-        string hint = "双击空白加点 · 双击圆点删点 · 拖动圆点调整（最多 12 点）";
+        string hint = "双击空白加点 · 双击圆点删点 · 拖动或方向键微调（Shift 加速，最多 12 点）";
         float hintX = plot.X + S(6);
         float hintWidth = plot.Right - axisCaption.Width - S(10) - hintX;
         if (hintWidth > S(80))
@@ -231,8 +244,61 @@ internal sealed class FanCurveEditor : Control
     private void OnMouseDown(object? sender, MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
+        Focus();
         _dragIndex = HitTest(e.Location);
+        _selectedIndex = _dragIndex;
         Invalidate();
+    }
+
+    /// <summary>Arrow keys nudge the selected point: left/right by one degree, up/down by one
+    /// percent, with Shift raising the step to five. The point stays inside its neighbours so the
+    /// curve can never fold back on itself, and focus is only taken when a point is selected.</summary>
+    protected override bool IsInputKey(Keys keyData)
+    {
+        Keys key = keyData & Keys.KeyCode;
+        if (key is Keys.Left or Keys.Right or Keys.Up or Keys.Down) return true;
+        return base.IsInputKey(keyData);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (_selectedIndex is not { } i || i >= _points.Count)
+        {
+            base.OnKeyDown(e);
+            return;
+        }
+
+        int step = e.Shift ? 5 : 1;
+        var (temp, percent) = _points[i];
+        int newTemp = temp;
+        int newPercent = percent;
+
+        switch (e.KeyCode)
+        {
+            case Keys.Left: newTemp = temp - step; break;
+            case Keys.Right: newTemp = temp + step; break;
+            case Keys.Up: newPercent = percent + step; break;
+            case Keys.Down: newPercent = percent - step; break;
+            default:
+                base.OnKeyDown(e);
+                return;
+        }
+
+        newTemp = Math.Clamp(newTemp, MinTemp, MaxTemp);
+        if (i > 0) newTemp = Math.Max(newTemp, _points[i - 1].TempC + 1);
+        if (i < _points.Count - 1) newTemp = Math.Min(newTemp, _points[i + 1].TempC - 1);
+        newPercent = Math.Clamp(newPercent, 0, 100);
+
+        if (newTemp == temp && newPercent == percent)
+        {
+            e.Handled = e.SuppressKeyPress = true;
+            return;
+        }
+
+        _points[i] = (newTemp, newPercent);
+        e.Handled = e.SuppressKeyPress = true;
+        Invalidate();
+        PointsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
@@ -257,12 +323,17 @@ internal sealed class FanCurveEditor : Control
         if (e.Button != MouseButtons.Left || !PlotRect.Contains(e.Location)) return;
         if (HitTest(e.Location) is { } idx)
         {
-            if (_points.Count > 2) _points.RemoveAt(idx);
+            if (_points.Count > 2)
+            {
+                _points.RemoveAt(idx);
+                _selectedIndex = null;
+            }
         }
         else if (_points.Count < MaxPoints)
         {
             _points.Add((TempAtX(e.X), PctAtY(e.Y)));
             _points.Sort((a, b) => a.TempC.CompareTo(b.TempC));
+            _selectedIndex = null;
         }
 
         Invalidate();
