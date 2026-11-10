@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE
+.vs/
+.idea/
+.vscode/
+
+# Build artifacts
+publish/
+*.pdb
+*.nupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Windows / OS junk
+Thumbs.db
+desktop.ini
+*.log
+.DS_Store

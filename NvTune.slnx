@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/NvTune.App/">
+    <Project Path="src/NvTune.App/NvTune.csproj" />
+  </Folder>
+  <Folder Name="/src/NvTune.Launcher/">
+    <Project Path="src/NvTune.Launcher/Launcher.csproj" />
+  </Folder>
+</Solution>
