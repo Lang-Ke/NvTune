@@ -7,6 +7,72 @@ namespace SimpleNvidiaUndervolt;
 /// leaving native child controls half-painted, so the dark option was removed outright.</summary>
 internal static class Theme
 {
+    /// <summary>Scales a design pixel value by the current DPI relative to 96. Control layouts
+    /// use this for every fixed height so a 175% display no longer clips text into overlap.</summary>
+    public static int Scaled(int designPx)
+    {
+        return Math.Max(designPx, (int)Math.Round(designPx * DpiScale));
+    }
+
+    private static float? _dpiScaleOverride;
+    private static float? _cachedDpiScale;
+
+    /// <summary>Test hook: a harness renders the window at a simulated DPI so a 175% layout can be
+    /// inspected on a 100% display. Production code never sets it.</summary>
+    internal static float? DpiScaleOverride
+    {
+        get => _dpiScaleOverride;
+        set { _dpiScaleOverride = value; _cachedDpiScale = null; }
+    }
+
+    /// <summary>The DPI ratio every fixed pixel value is multiplied by. Cached because layout and
+    /// paint call it many times per frame and each probe costs a GDI round trip.</summary>
+    public static float DpiScale
+    {
+        get
+        {
+            if (_cachedDpiScale is { } cached) return cached;
+            if (_dpiScaleOverride is { } forced && forced > 0)
+            {
+                _cachedDpiScale = forced;
+                return forced;
+            }
+            float scale = SystemDpi() / 96f;
+            if (scale <= 0) scale = 1f;
+            _cachedDpiScale = scale;
+            return scale;
+        }
+    }
+
+    /// <summary>Drops the cached ratio so a monitor change is picked up on the next layout pass.</summary>
+    public static void ResetDpiCache(float? dpi = null)
+    {
+        _cachedDpiScale = dpi is { } known && known > 0 ? known / 96f : null;
+    }
+
+    /// <summary>The DPI the window is laid out for. GetDpiForSystem is used first because a
+    /// per-monitor-DPI-aware process can read a stale value from the screen DC.</summary>
+    private static float SystemDpi()
+    {
+        try
+        {
+            uint dpi = GetDpiForSystem();
+            if (dpi > 0) return dpi;
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+        catch (DllNotFoundException)
+        {
+        }
+
+        using var g = Graphics.FromHwnd(IntPtr.Zero);
+        return g.DpiX > 0 ? g.DpiX : 96f;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForSystem();
+
     private sealed record Palette(
         Color Canvas, Color Surface, Color PlotBackground, Color Border, Color Text, Color Muted,
         Color Accent, Color AccentHover, Color AccentDown, Color AccentSoft,
@@ -71,7 +137,11 @@ internal static class Theme
     public static Color CanvasAlt => _palette.CanvasAlt;
     public static Color Shadow => _palette.Shadow;
 
-    public static Font TitleFont(float size = 16f) => new("Microsoft YaHei UI", size, FontStyle.Bold);
+    /// <summary>Point sizes already scale with the device DPI, so production passes them through.
+    /// Only the simulated-DPI test hook inflates them, keeping the harness faithful.</summary>
+    private static float Pt(float points) => DpiScaleOverride is { } forced && forced > 0 ? points * forced : points;
+
+    public static Font TitleFont(float size = 16f) => new("Microsoft YaHei UI", Pt(size), FontStyle.Bold);
 
     public static Color Mix(Color first, Color second, float secondAmount)
     {
@@ -81,9 +151,10 @@ internal static class Theme
             (int)(first.G + (second.G - first.G) * t),
             (int)(first.B + (second.B - first.B) * t));
     }
-    public static Font CardFont() => new("Microsoft YaHei UI", 11f, FontStyle.Bold);
-    public static Font BodyFont() => new("Microsoft YaHei UI", 9.5f);
-    public static Font SmallFont() => new("Microsoft YaHei UI", 8.5f);
+    public static Font CardFont() => new("Microsoft YaHei UI", Pt(11f), FontStyle.Bold);
+    public static Font BodyFont() => new("Microsoft YaHei UI", Pt(9.5f));
+    public static Font SmallFont() => new("Microsoft YaHei UI", Pt(8.5f));
+    public static Font SmallBoldFont() => new("Microsoft YaHei UI", Pt(8.5f), FontStyle.Bold);
 
     public static Button PrimaryButton(string text, EventHandler onClick, int width = 128)
     {
@@ -93,8 +164,8 @@ internal static class Theme
             Text = text,
             BackColor = Canvas,
             ForeColor = Text,
-            Width = width,
-            Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold),
+            Width = Scaled(width),
+            Font = new Font("Microsoft YaHei UI", Pt(9.5f), FontStyle.Bold),
         };
         button.Click += onClick;
         return button;
@@ -106,8 +177,8 @@ internal static class Theme
         {
             Kind = ButtonKind.Secondary,
             Text = text,
-            Width = width,
-            Font = new Font("Microsoft YaHei UI", 9.5f),
+            Width = Scaled(width),
+            Font = new Font("Microsoft YaHei UI", Pt(9.5f)),
         };
         button.Click += onClick;
         return button;
@@ -120,8 +191,8 @@ internal static class Theme
             Minimum = minimum,
             Maximum = maximum,
             Value = value,
-            Width = width,
-            Height = 32,
+            Width = Scaled(width),
+            Height = Scaled(32),
             Font = BodyFont(),
             Margin = new Padding(0, 0, 0, 0),
         };
@@ -133,8 +204,8 @@ internal static class Theme
         return new DarkCombo
         {
             DropDownStyle = dropDownList ? ComboBoxStyle.DropDownList : ComboBoxStyle.DropDown,
-            Width = width,
-            Height = 32,
+            Width = Scaled(width),
+            Height = Scaled(32),
             Font = BodyFont(),
             Margin = new Padding(0, 0, 0, 0),
         };
@@ -190,36 +261,41 @@ internal static class Theme
     /// paints its own background so the corners stay round; its children sit inside the padding.</summary>
     public static Panel Card(string title, out Panel body)
     {
-        var card = new Panel
+        var card = new BufferedPanel
         {
             Dock = DockStyle.Fill,
             BackColor = Surface,
-            Margin = new Padding(0, 0, 0, 14),
-            Padding = new Padding(18, 12, 18, 14),
-            MinimumSize = new Size(0, 124),
+            Margin = new Padding(0, 0, 0, Scaled(14)),
+            Padding = new Padding(Scaled(18), Scaled(12), Scaled(18), Scaled(14)),
+            MinimumSize = new Size(0, Scaled(124)),
         };
         card.Paint += (_, e) =>
         {
+            // A resize can hand the panel a near-zero rectangle. Rounded() would then build a
+            // degenerate path and the card would paint as a torn fragment mid-drag.
+            if (card.Width < 12 || card.Height < 12) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             // A soft drop shadow under the card reads as depth without a heavy border.
-            var shadow = new Rectangle(2, 3, card.Width - 5, card.Height - 5);
-            using (GraphicsPath shadowPath = Rounded(shadow, 14))
+            var shadow = new Rectangle(Scaled(2), Scaled(3), Math.Max(1, card.Width - Scaled(5)),
+                Math.Max(1, card.Height - Scaled(5)));
+            using (GraphicsPath shadowPath = Rounded(shadow, Scaled(14)))
             using (var shadowBrush = new SolidBrush(Shadow)) e.Graphics.FillPath(shadowBrush, shadowPath);
 
-            var rect = new Rectangle(0, 0, card.Width - 2, card.Height - 4);
-            using GraphicsPath path = Rounded(rect, 12);
+            var rect = new Rectangle(0, 0, Math.Max(1, card.Width - Scaled(2)), Math.Max(1, card.Height - Scaled(4)));
+            using GraphicsPath path = Rounded(rect, Scaled(12));
             using (var fill = new SolidBrush(Surface)) e.Graphics.FillPath(fill, path);
             using var pen = new Pen(Border);
             e.Graphics.DrawPath(pen, path);
         };
 
-        var heading = new Panel { Dock = DockStyle.Top, Height = 36, BackColor = Surface };
-        var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = Surface, Margin = new Padding(0, 8, 0, 8) };
+        var heading = new BufferedPanel { Dock = DockStyle.Top, Height = Scaled(38), BackColor = Surface };
+        var bar = new BufferedPanel { Dock = DockStyle.Left, Width = Scaled(4), BackColor = Surface };
         bar.Paint += (_, e) =>
         {
+            if (bar.Height < Scaled(14)) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var barRect = new Rectangle(0, 4, 4, Math.Max(6, bar.Height - 8));
-            using GraphicsPath barPath = Rounded(barRect, 2);
+            var barRect = new Rectangle(0, Scaled(4), Scaled(4), Math.Max(Scaled(6), bar.Height - Scaled(8)));
+            using GraphicsPath barPath = Rounded(barRect, Scaled(2));
             using var gradient = new LinearGradientBrush(barRect, Accent, AccentAlt, 90f);
             e.Graphics.FillPath(gradient, barPath);
         };
@@ -230,10 +306,10 @@ internal static class Theme
             ForeColor = Text,
             Font = CardFont(),
             TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(12, 0, 0, 0),
+            Padding = new Padding(Scaled(12), 0, 0, 0),
         });
         heading.Controls.Add(bar);
-        body = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(0, 4, 0, 0) };
+        body = new BufferedPanel { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(0, Scaled(4), 0, 0) };
         card.Controls.Add(body);
         card.Controls.Add(heading);
         return card;
@@ -254,12 +330,24 @@ internal static class Theme
 
 internal enum ButtonKind { Primary, Secondary }
 
+/// <summary>A Panel with painting double-buffered, so custom-drawn cards don't leave fragments
+/// behind while the window is being resized.</summary>
+internal sealed class BufferedPanel : Panel
+{
+    public BufferedPanel()
+    {
+        DoubleBuffered = true;
+    }
+}
+
 /// <summary>A numeric field built from a borderless text box and painted arrows. The stock
 /// NumericUpDown locks its height to the font metrics and paints its editor with a system brush
 /// that ignores BackColor, so it can be neither 32px tall nor reliably dark.</summary>
 internal sealed class DarkNumeric : Control
 {
-    private const int SpinnerWidth = 18;
+    /// <summary>The arrow strip must grow with the field, otherwise the 18px strip stays tiny
+    /// beside a DPI-scaled 56px box and the arrows become hard to hit.</summary>
+    private static int SpinnerWidth => Theme.Scaled(20);
     private readonly TextBox _editor;
     private decimal _value;
     private decimal _minimum;
@@ -272,7 +360,7 @@ internal sealed class DarkNumeric : Control
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
             | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        Height = 32;
+        Height = Theme.Scaled(32);
         BackColor = Theme.Neutral;
         ForeColor = Theme.Text;
         Cursor = Cursors.Default;
@@ -330,6 +418,15 @@ internal sealed class DarkNumeric : Control
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public decimal Increment { get; set; } = 1;
 
+    /// <summary>True only while a spinner arrow or the wheel is driving the value, so a listener
+    /// that snaps values can tell a deliberate step from a typed entry.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool Stepping { get; private set; }
+
+    /// <summary>+1 for an up step, -1 for a down step, 0 when the change did not come from the arrows.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public int StepDirection { get; private set; }
+
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public HorizontalAlignment TextAlign
     {
@@ -357,7 +454,8 @@ internal sealed class DarkNumeric : Control
     private void CommitText()
     {
         if (_updating) return;
-        if (!decimal.TryParse(_editor.Text.Trim(), out decimal parsed))
+        string text = _editor.Text.Trim().Replace(",", string.Empty).Replace(" ", string.Empty);
+        if (!decimal.TryParse(text, out decimal parsed))
         {
             ShowValue();
             return;
@@ -371,7 +469,20 @@ internal sealed class DarkNumeric : Control
 
     private void Step(int direction)
     {
-        Value = _value + Increment * direction;
+        // The editor may hold a value the user typed but never confirmed. Committing first makes
+        // the arrow step from what is on screen instead of the previously applied number.
+        CommitText();
+        StepDirection = direction;
+        Stepping = true;
+        try
+        {
+            Value = _value + Increment * direction;
+        }
+        finally
+        {
+            Stepping = false;
+            StepDirection = 0;
+        }
         Invalidate();
     }
 
@@ -392,9 +503,10 @@ internal sealed class DarkNumeric : Control
     {
         base.OnLayout(e);
         if (_editor is null) return;
-        int editorHeight = Math.Min(_editor.PreferredHeight, Math.Max(10, Height - 6));
-        _editor.Bounds = new Rectangle(10, Math.Max(1, (Height - editorHeight) / 2),
-            Math.Max(8, Width - SpinnerWidth - 16), editorHeight);
+        int inset = Theme.Scaled(10);
+        int editorHeight = Math.Min(_editor.PreferredHeight, Math.Max(10, Height - Theme.Scaled(6)));
+        _editor.Bounds = new Rectangle(inset, Math.Max(1, (Height - editorHeight) / 2),
+            Math.Max(8, Width - SpinnerWidth - inset - Theme.Scaled(6)), editorHeight);
     }
 
     protected override void OnFontChanged(EventArgs e)
@@ -414,11 +526,12 @@ internal sealed class DarkNumeric : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
+        if (Width < 12 || Height < 12) return;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var clear = new SolidBrush(Parent?.BackColor ?? Theme.Surface)) g.FillRectangle(clear, ClientRectangle);
 
         var field = new Rectangle(0, 0, Math.Max(10, Width - 1), Height - 1);
-        using (GraphicsPath path = Theme.Rounded(field, 7))
+        using (GraphicsPath path = Theme.Rounded(field, Theme.Scaled(7)))
         {
             using (var fill = new SolidBrush(Theme.Neutral)) g.FillPath(fill, path);
             using var pen = new Pen(ContainsFocus ? Theme.Accent : Theme.Border);
@@ -426,7 +539,10 @@ internal sealed class DarkNumeric : Control
         }
 
         var buttons = new Rectangle(Width - SpinnerWidth, 1, SpinnerWidth - 2, Height - 3);
-        using (var divider = new Pen(Theme.Border)) g.DrawLine(divider, buttons.Left, 5, buttons.Left, Height - 6);
+        using (var divider = new Pen(Theme.Border))
+        {
+            g.DrawLine(divider, buttons.Left, Theme.Scaled(5), buttons.Left, Height - Theme.Scaled(6));
+        }
         DrawArrow(g, new Rectangle(buttons.Left, buttons.Top, buttons.Width, buttons.Height / 2), true);
         DrawArrow(g, new Rectangle(buttons.Left, buttons.Top + buttons.Height / 2, buttons.Width, buttons.Height / 2), false);
     }
@@ -434,9 +550,19 @@ internal sealed class DarkNumeric : Control
     private static void DrawArrow(Graphics g, Rectangle cell, bool up)
     {
         int cx = cell.Left + cell.Width / 2, cy = cell.Top + cell.Height / 2;
+        int halfWidth = Theme.Scaled(4);
+        int halfHeight = Theme.Scaled(3);
         Point[] points = up
-            ? new[] { new Point(cx - 4, cy + 2), new Point(cx + 4, cy + 2), new Point(cx, cy - 3) }
-            : new[] { new Point(cx - 4, cy - 2), new Point(cx + 4, cy - 2), new Point(cx, cy + 3) };
+            ? new[]
+            {
+                new Point(cx - halfWidth, cy + Theme.Scaled(2)), new Point(cx + halfWidth, cy + Theme.Scaled(2)),
+                new Point(cx, cy - halfHeight),
+            }
+            : new[]
+            {
+                new Point(cx - halfWidth, cy - Theme.Scaled(2)), new Point(cx + halfWidth, cy - Theme.Scaled(2)),
+                new Point(cx, cy + halfHeight),
+            };
         using var brush = new SolidBrush(Theme.Muted);
         g.FillPolygon(brush, points);
     }
@@ -467,7 +593,7 @@ internal sealed class DarkCombo : ComboBox
         DrawMode = DrawMode.OwnerDrawFixed;
         // ComboBox height is derived from ItemHeight, so this is what makes the field 32px and
         // keeps it flush with the numeric boxes and buttons beside it.
-        ItemHeight = 26;
+        ItemHeight = Theme.Scaled(26);
         DropDownStyle = ComboBoxStyle.DropDownList;
         IntegralHeight = false;
         DropDownHeight = 240;
@@ -505,7 +631,7 @@ internal sealed class ModernButton : Button
             | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
-        Height = 36;
+        Height = Theme.Scaled(36);
         Cursor = Cursors.Default;
         UseVisualStyleBackColor = false;
     }
@@ -522,6 +648,7 @@ internal sealed class ModernButton : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
+        if (Width < 8 || Height < 8) return;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
         using (var clear = new SolidBrush(Parent?.BackColor ?? Theme.Canvas)) g.FillRectangle(clear, ClientRectangle);
@@ -549,7 +676,7 @@ internal sealed class ModernButton : Button
             fore = Theme.Text;
         }
 
-        using GraphicsPath path = Theme.Rounded(rect, 8);
+        using GraphicsPath path = Theme.Rounded(rect, Theme.Scaled(8));
         if (gradient is not null)
         {
             using (gradient) g.FillPath(gradient, path);

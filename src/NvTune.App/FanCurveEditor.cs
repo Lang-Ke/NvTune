@@ -49,8 +49,21 @@ internal sealed class FanCurveEditor : Control
 
     public void ResetToDefault() => SetPoints(FanCurve.Default.Points);
 
-    private RectangleF PlotRect => new(Math.Max(52, Width * 0.07f), 26,
-        Math.Max(60, Width - Math.Max(88, Width * 0.12f)), Math.Max(60, Height - 64));
+    private static int S(int px) => Theme.Scaled(px);
+
+    private RectangleF PlotRect
+    {
+        get
+        {
+            int left = Math.Max(S(52), (int)(Width * 0.07f));
+            int top = S(26);
+            int rightInset = Math.Max(S(88), (int)(Width * 0.12f));
+            int bottomInset = S(64);
+            int plotWidth = Math.Max(S(60), Width - left - rightInset);
+            int plotHeight = Math.Max(S(60), Height - top - bottomInset);
+            return new RectangleF(left, top, plotWidth, plotHeight);
+        }
+    }
 
     private int TempAtX(float x) => (int)Math.Clamp(MinTemp + (x - PlotRect.X) / PlotRect.Width * (MaxTemp - MinTemp), MinTemp, MaxTemp);
     private int PctAtY(float y) => (int)Math.Clamp(100 - (y - PlotRect.Y) / PlotRect.Height * 100, 0, 100);
@@ -64,44 +77,54 @@ internal sealed class FanCurveEditor : Control
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         g.Clear(Theme.PlotBackground);
 
+        // Every brush and pen is owned by one using block: the earlier code allocated brushes
+        // inside the grid loops, so each resize frame leaked GDI handles until painting stalled
+        // and the plot smeared.
+        float dpiScale = Math.Max(1f, Theme.DpiScale);
+        var plot = PlotRect;
         using var gridPen = new Pen(Theme.Grid, 1f);
         using var axisPen = new Pen(Theme.Axis, 1.2f);
-        using var minorFont = new Font("Segoe UI", 8f);
-        using var labelFont = new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold);
-        using var hintFont = new Font("Microsoft YaHei UI", 8f);
+        using var minorFont = new Font("Segoe UI", 8f * dpiScale);
+        using var labelFont = new Font("Microsoft YaHei UI", 8.25f * dpiScale, FontStyle.Bold);
+        using var hintFont = new Font("Microsoft YaHei UI", 8f * dpiScale);
+        using var mutedBrush = new SolidBrush(Theme.Muted);
+        using var textBrush = new SolidBrush(Theme.Text);
+        using var warningBrush = new SolidBrush(Theme.Warning);
 
         using (var plotBrush = new SolidBrush(Theme.Surface))
         {
-            g.FillRectangle(plotBrush, PlotRect);
+            g.FillRectangle(plotBrush, plot);
         }
 
         for (int t = MinTemp; t <= MaxTemp; t += 5)
         {
             float x = XAtTemp(t);
-            g.DrawLine(t % 20 == 0 ? axisPen : gridPen, x, PlotRect.Y, x, PlotRect.Bottom);
+            g.DrawLine(t % 20 == 0 ? axisPen : gridPen, x, plot.Y, x, plot.Bottom);
             if (t % 20 == 0)
             {
                 string caption = $"{t}°";
                 var size = g.MeasureString(caption, minorFont);
-                g.DrawString(caption, minorFont, new SolidBrush(Theme.Muted), x - size.Width / 2, PlotRect.Bottom + 6);
+                g.DrawString(caption, minorFont, mutedBrush, x - size.Width / 2, plot.Bottom + S(6));
             }
         }
 
         for (int p = 0; p <= 100; p += 5)
         {
             float y = YAtPct(p);
-            g.DrawLine(p % 25 == 0 ? axisPen : gridPen, PlotRect.X, y, PlotRect.Right, y);
+            g.DrawLine(p % 25 == 0 ? axisPen : gridPen, plot.X, y, plot.Right, y);
             if (p % 25 == 0)
             {
                 string caption = $"{p}";
                 var size = g.MeasureString(caption, minorFont);
-                g.DrawString(caption, minorFont, new SolidBrush(Theme.Muted), PlotRect.X - size.Width - 9, y - size.Height / 2);
+                g.DrawString(caption, minorFont, mutedBrush, plot.X - size.Width - S(9), y - size.Height / 2);
             }
         }
 
-        g.DrawRectangle(axisPen, PlotRect.X, PlotRect.Y, PlotRect.Width, PlotRect.Height);
-        g.DrawString("风扇转速 %", labelFont, new SolidBrush(Theme.Text), 8, 4);
-        g.DrawString("核心温度 °C", labelFont, new SolidBrush(Theme.Text), PlotRect.Right - 76, PlotRect.Bottom + 23);
+        g.DrawRectangle(axisPen, plot.X, plot.Y, plot.Width, plot.Height);
+        g.DrawString("风扇转速 %", labelFont, textBrush, S(8), S(4));
+        var axisCaption = g.MeasureString("核心温度 °C", labelFont);
+        float captionY = plot.Bottom + S(23);
+        g.DrawString("核心温度 °C", labelFont, textBrush, plot.Right - axisCaption.Width, captionY);
 
         if (_points.Count > 1)
         {
@@ -113,9 +136,9 @@ internal sealed class FanCurveEditor : Control
             }
 
             var area = path.ToList();
-            area.Add(new PointF(path[^1].X, PlotRect.Bottom));
-            area.Add(new PointF(path[0].X, PlotRect.Bottom));
-            using var fill = new LinearGradientBrush(PlotRect,
+            area.Add(new PointF(path[^1].X, plot.Bottom));
+            area.Add(new PointF(path[0].X, plot.Bottom));
+            using var fill = new LinearGradientBrush(plot,
                 Color.FromArgb(52, Theme.Curve), Color.FromArgb(4, Theme.Curve), 90f);
             g.FillPolygon(fill, area.ToArray());
 
@@ -133,9 +156,9 @@ internal sealed class FanCurveEditor : Control
             var (t, p) = _points[i];
             float x = XAtTemp(t), y = YAtPct(p);
             bool active = _dragIndex == i || _hoverIndex == i;
-            float radius = active ? 7f : 6f;
+            float radius = active ? 7f * dpiScale : 6f * dpiScale;
             using var halo = new SolidBrush(active ? Color.FromArgb(38, Theme.Curve) : Color.FromArgb(18, Theme.Curve));
-            g.FillEllipse(halo, x - radius - 5, y - radius - 5, (radius + 5) * 2, (radius + 5) * 2);
+            g.FillEllipse(halo, x - radius - S(5), y - radius - S(5), (radius + S(5)) * 2, (radius + S(5)) * 2);
             using var center = new SolidBrush(active ? Theme.Curve : Theme.PlotBackground);
             using var ring = new Pen(Theme.Curve, 2.2f);
             g.FillEllipse(center, x - radius, y - radius, radius * 2, radius * 2);
@@ -143,13 +166,13 @@ internal sealed class FanCurveEditor : Control
 
             string caption = $"{t}°  {p}%";
             var size = g.MeasureString(caption, labelFont);
-            float cx = Math.Clamp(x - size.Width / 2, PlotRect.X + 2, PlotRect.Right - size.Width - 2);
-            float cy = Math.Max(PlotRect.Y + 2, y - size.Height - 12);
+            float cx = Math.Clamp(x - size.Width / 2, plot.X + S(2), plot.Right - size.Width - S(2));
+            float cy = Math.Max(plot.Y + S(2), y - size.Height - S(12));
             using var back = new SolidBrush(Mixed(Theme.Surface, Theme.Text, 0.12f));
             using var backPen = new Pen(Theme.Border);
-            g.FillRectangle(back, cx - 3, cy, size.Width + 6, size.Height);
-            g.DrawRectangle(backPen, cx - 3, cy, size.Width + 6, size.Height);
-            g.DrawString(caption, labelFont, new SolidBrush(Theme.Text), cx, cy);
+            g.FillRectangle(back, cx - S(3), cy, size.Width + S(6), size.Height);
+            g.DrawRectangle(backPen, cx - S(3), cy, size.Width + S(6), size.Height);
+            g.DrawString(caption, labelFont, textBrush, cx, cy);
         }
 
         if (_currentTemp >= MinTemp && _currentTemp <= MaxTemp)
@@ -157,26 +180,39 @@ internal sealed class FanCurveEditor : Control
             float x = XAtTemp(_currentTemp);
             int pct = _points.Count > 0 ? new FanCurve(_points).FanPercentAt(_currentTemp) : 50;
             using var markerPen = new Pen(Theme.Marker, 1.6f) { DashStyle = DashStyle.Dash };
-            g.DrawLine(markerPen, x, PlotRect.Y, x, PlotRect.Bottom);
+            g.DrawLine(markerPen, x, plot.Y, x, plot.Bottom);
             using var markerBrush = new SolidBrush(Theme.Marker);
             g.FillEllipse(markerBrush, x - 4.5f, YAtPct(pct) - 4.5f, 9, 9);
             string caption = $"当前 {_currentTemp}°C  →  {pct}%";
             var size = g.MeasureString(caption, labelFont);
-            float cx = Math.Clamp(x + 8, PlotRect.X + 4, PlotRect.Right - size.Width - 6);
+            float cx = Math.Clamp(x + S(8), plot.X + S(4), plot.Right - size.Width - S(6));
             using var back = new SolidBrush(Mixed(Theme.Surface, Theme.Warning, 0.14f));
-            g.FillRectangle(back, cx - 4, PlotRect.Y + 6, size.Width + 8, size.Height + 2);
-            g.DrawString(caption, labelFont, new SolidBrush(Theme.Warning), cx, PlotRect.Y + 7);
+            g.FillRectangle(back, cx - S(4), plot.Y + S(6), size.Width + S(8), size.Height + S(2));
+            g.DrawString(caption, labelFont, warningBrush, cx, plot.Y + S(7));
         }
 
-        g.DrawString("双击空白加点 · 双击圆点删点 · 拖动圆点调整（最多 12 点）",
-            hintFont, new SolidBrush(Theme.Muted), PlotRect.X + 6, PlotRect.Bottom + 24);
+        // The hint shares the row under the plot with the axis caption, so it is clipped to the
+        // space left of that caption instead of running underneath it at large font scales.
+        string hint = "双击空白加点 · 双击圆点删点 · 拖动圆点调整（最多 12 点）";
+        float hintX = plot.X + S(6);
+        float hintWidth = plot.Right - axisCaption.Width - S(10) - hintX;
+        if (hintWidth > S(80))
+        {
+            using var hintFormat = new StringFormat(StringFormatFlags.NoWrap)
+            {
+                Trimming = StringTrimming.EllipsisCharacter,
+            };
+            g.DrawString(hint, hintFont, mutedBrush,
+                new RectangleF(hintX, plot.Bottom + S(24), hintWidth, hintFont.Height * 2), hintFormat);
+        }
     }
 
     private int? HitTest(Point pos)
     {
         for (int i = 0; i < _points.Count; i++)
         {
-            if (Math.Abs(pos.X - XAtTemp(_points[i].TempC)) <= 11 && Math.Abs(pos.Y - YAtPct(_points[i].Percent)) <= 11)
+            int tolerance = S(11);
+            if (Math.Abs(pos.X - XAtTemp(_points[i].TempC)) <= tolerance && Math.Abs(pos.Y - YAtPct(_points[i].Percent)) <= tolerance)
             {
                 return i;
             }

@@ -4,25 +4,27 @@ namespace SimpleNvidiaUndervolt;
 
 internal sealed class MainForm : Form
 {
+    private static int D(int px) => Theme.Scaled(px);
+
     private readonly ComboBox _gpuSelector = Theme.Combo(340);
     private readonly Label _gpuInfo = new()
     {
         AutoSize = true,
         ForeColor = Theme.Muted,
         Font = Theme.SmallFont(),
-        Margin = new Padding(2, 3, 0, 0),
+        Margin = new Padding(D(2), D(3), 0, 0),
     };
     private readonly Label _taskBadge = new()
     {
         // A fixed 36px box matches the theme button beside it, so both share one centre line
         // instead of differing by the rounding of their own text heights.
         AutoSize = false,
-        Height = 36,
-        Width = 132,
+        Height = Theme.Scaled(36),
+        Width = Theme.Scaled(132),
         Padding = new Padding(0),
         BackColor = Theme.AccentSoft,
         ForeColor = Theme.Accent,
-        Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold),
+        Font = Theme.SmallBoldFont(),
         TextAlign = ContentAlignment.MiddleCenter,
         Anchor = AnchorStyles.None,
     };
@@ -39,14 +41,14 @@ internal sealed class MainForm : Form
         ForeColor = Theme.Muted,
         Font = Theme.SmallFont(),
         TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(2, 0, 0, 0),
+        Padding = new Padding(D(2), 0, 0, 0),
     };
     private readonly Label _statusLabel = new()
     {
         Dock = DockStyle.Bottom,
-        Height = 40,
+        Height = Theme.Scaled(40),
         TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(20, 0, 0, 0),
+        Padding = new Padding(D(20), 0, 0, 0),
         ForeColor = Theme.Text,
         BackColor = Theme.Surface,
     };
@@ -73,9 +75,17 @@ internal sealed class MainForm : Form
         Text = "NvTune · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        MinimumSize = new Size(1060, 830);
-        Size = new Size(1140, 900);
+        // Every fixed pixel value in this form goes through Theme.Scaled(). Letting WinForms also
+        // apply its own DPI autoscale would multiply the two factors and blow the layout apart on
+        // a 175% display, so the scaling has exactly one owner.
+        AutoScaleMode = AutoScaleMode.None;
+        DoubleBuffered = true;
+        ResizeRedraw = true;
+        // On a small screen at 250% the design layout cannot fit, so the window scrolls instead of
+        // squeezing the cards until their rows overlap.
+        AutoScroll = true;
+        MinimumSize = new Size(D(880), D(600));
+        Size = new Size(D(1140), D(900));
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
@@ -83,15 +93,18 @@ internal sealed class MainForm : Form
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(18, 14, 18, 0),
+            Padding = new Padding(D(18), D(14), D(18), 0),
             ColumnCount = 1,
             RowCount = 4,
             BackColor = Theme.Canvas,
         };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(100)));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(132)));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(64)));
+        // The floor keeps every card at its design height; without it a short window shrinks the
+        // percent row below the fan card's minimum and the heading paints over the plot.
+        root.MinimumSize = new Size(D(880) - D(36), D(14) + D(100) + D(132) + D(360) + D(64));
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(BuildUndervoltCard(), 0, 1);
         root.Controls.Add(BuildFanCard(), 0, 2);
@@ -125,24 +138,24 @@ internal sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 92,
+            Height = D(92),
             BackColor = Theme.Canvas,
             ColumnCount = 3,
             RowCount = 1,
-            Padding = new Padding(4, 4, 4, 8),
+            Padding = new Padding(D(4), D(4), D(4), D(8)),
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var brand = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 26, 0) };
+        var brand = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, D(26), 0) };
         brand.Controls.Add(new Label
         {
             Text = "NvTune",
             Font = Theme.TitleFont(19f),
             ForeColor = Theme.Text,
             AutoSize = true,
-            Margin = new Padding(0, 2, 0, 0),
+            Margin = new Padding(0, D(2), 0, 0),
         });
         brand.Controls.Add(new Label
         {
@@ -150,7 +163,7 @@ internal sealed class MainForm : Form
             Font = Theme.SmallFont(),
             ForeColor = Theme.Muted,
             AutoSize = true,
-            Margin = new Padding(1, 1, 0, 0),
+            Margin = new Padding(D(1), D(1), 0, 0),
         });
 
         _gpuSelector.SelectedIndexChanged += (_, _) => OnGpuChanged();
@@ -159,13 +172,13 @@ internal sealed class MainForm : Form
             FlowDirection = FlowDirection.TopDown,
             AutoSize = true,
             WrapContents = false,
-            Margin = new Padding(0, 8, 0, 0),
+            Margin = new Padding(0, D(8), 0, 0),
         };
         gpuStack.Controls.Add(Theme.Caption("选择显卡"));
         gpuStack.Controls.Add(_gpuSelector);
         gpuStack.Controls.Add(_gpuInfo);
 
-        _taskBadge.Margin = new Padding(0, 0, 4, 0);
+        _taskBadge.Margin = new Padding(0, 0, D(4), 0);
         panel.Controls.Add(brand, 0, 0);
         panel.Controls.Add(gpuStack, 1, 0);
         panel.Controls.Add(_taskBadge, 2, 0);
@@ -179,16 +192,16 @@ internal sealed class MainForm : Form
         // next, so nothing drifts when a caption wraps or a control changes height.
         var grid = Theme.Table(5, 2);
         grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(40)));
         AddField(grid, 0, "电压上限 (mV)", _mvInput);
         AddField(grid, 1, "该电压目标频率 (MHz)", _mhzInput);
         AddField(grid, 2, "显存偏移 (MHz)", _memInput);
 
         var applyUndervolt = Theme.PrimaryButton("本次应用", (_, _) => ApplyUndervolt());
         new ToolTip().SetToolTip(applyUndervolt, "仅本次运行临时应用降压，关闭软件后恢复已保存配置");
-        grid.Controls.Add(Theme.Cell(applyUndervolt, new Padding(18, 0, 0, 0)), 3, 1);
+        grid.Controls.Add(Theme.Cell(applyUndervolt, new Padding(D(18), 0, 0, 0)), 3, 1);
         grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()),
-            new Padding(10, 0, 0, 0)), 4, 1);
+            new Padding(D(10), 0, 0, 0)), 4, 1);
 
         cardBody.Controls.Add(grid);
         return card;
@@ -199,30 +212,30 @@ internal sealed class MainForm : Form
         var card = Theme.Card("风扇控制", out var fanBody);
         var top = Theme.Table(9, 1);
         top.Dock = DockStyle.Top;
-        top.Height = 48;
+        top.Height = D(56);
         top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        top.Controls.Add(Theme.CellLabel("模式", new Padding(0, 0, 8, 0)), 0, 0);
-        top.Controls.Add(Theme.Cell(_fanMode, new Padding(0, 0, 20, 0)), 1, 0);
-        top.Controls.Add(Theme.CellLabel("固定转速", new Padding(0, 0, 8, 0)), 2, 0);
-        top.Controls.Add(Theme.Cell(_fanFixed, new Padding(0, 0, 4, 0)), 3, 0);
-        top.Controls.Add(Theme.CellLabel("%", new Padding(0, 0, 20, 0)), 4, 0);
+        top.Controls.Add(Theme.CellLabel("模式", new Padding(0, 0, D(8), 0)), 0, 0);
+        top.Controls.Add(Theme.Cell(_fanMode, new Padding(0, 0, D(20), 0)), 1, 0);
+        top.Controls.Add(Theme.CellLabel("固定转速", new Padding(0, 0, D(8), 0)), 2, 0);
+        top.Controls.Add(Theme.Cell(_fanFixed, new Padding(0, 0, D(4), 0)), 3, 0);
+        top.Controls.Add(Theme.CellLabel("%", new Padding(0, 0, D(20), 0)), 4, 0);
 
         var applyFan = Theme.PrimaryButton("本次应用", (_, _) => ApplyFanSettings());
         new ToolTip().SetToolTip(applyFan, "仅本次运行临时应用风扇设置，关闭软件后恢复已保存配置");
         // The left margin matches the undervolt row's button offset, so the two "本次应用"
         // buttons stack on one vertical line instead of drifting by a few pixels.
-        top.Controls.Add(Theme.Cell(applyFan, new Padding(10, 0, 10, 0)), 5, 0);
+        top.Controls.Add(Theme.Cell(applyFan, new Padding(D(10), 0, D(10), 0)), 5, 0);
         top.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => RestoreFanAuto()),
-            new Padding(0, 0, 22, 0)), 6, 0);
-        top.Controls.Add(Theme.CellLabel("推荐曲线", new Padding(0, 0, 8, 0)), 7, 0);
+            new Padding(0, 0, D(22), 0)), 6, 0);
+        top.Controls.Add(Theme.CellLabel("推荐曲线", new Padding(0, 0, D(8), 0)), 7, 0);
         top.Controls.Add(Theme.Cell(Theme.SecondaryButton("载入", (_, _) => _curveEditor.ResetToDefault(), 78),
             new Padding(0)), 8, 0);
 
-        var editorHost = new Panel
+        var editorHost = new BufferedPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(0, 2, 0, 0),
+            Padding = new Padding(0, D(2), 0, 0),
             BackColor = Theme.Surface,
         };
         editorHost.Controls.Add(_curveEditor);
@@ -230,9 +243,9 @@ internal sealed class MainForm : Form
         var bottom = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 32,
+            Height = D(40),
             FlowDirection = FlowDirection.LeftToRight,
-            Padding = new Padding(2, 9, 0, 0),
+            Padding = new Padding(D(2), D(8), 0, 0),
             BackColor = Theme.Surface,
         };
         bottom.Controls.Add(_daemonLabel);
@@ -247,17 +260,16 @@ internal sealed class MainForm : Form
     private Control BuildFooter()
     {
         var flow = Theme.Table(4, 1);
-        flow.Dock = DockStyle.Top;
-        flow.Height = 60;
-        flow.Padding = new Padding(4, 8, 0, 8);
+        flow.Height = D(60);
+        flow.Padding = new Padding(D(4), D(8), 0, D(8));
         flow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var save = Theme.PrimaryButton("写入配置", (_, _) => SaveAllSettings(), 132);
         var tip = new ToolTip();
         tip.SetToolTip(save, "把当前降压参数与风扇设置写入配置文件，重启后自动生效");
-        flow.Controls.Add(Theme.Cell(save, new Padding(0, 0, 6, 0)), 0, 0);
-        flow.Controls.Add(Theme.CellLabel("重启生效", new Padding(0, 0, 18, 0)), 1, 0);
+        flow.Controls.Add(Theme.Cell(save, new Padding(0, 0, D(6), 0)), 0, 0);
+        flow.Controls.Add(Theme.CellLabel("重启生效", new Padding(0, 0, D(18), 0)), 1, 0);
         flow.Controls.Add(Theme.Cell(Theme.SecondaryButton("全部恢复出厂", (_, _) => ClearEverything(), 132),
-            new Padding(0, 0, 8, 0)), 2, 0);
+            new Padding(0, 0, D(8), 0)), 2, 0);
         flow.Controls.Add(Theme.Cell(Theme.SecondaryButton("打开数据目录", (_, _) =>
         {
             try { Process.Start(new ProcessStartInfo(Persistence.DataDir()) { UseShellExecute = true }); }
@@ -270,9 +282,9 @@ internal sealed class MainForm : Form
     {
         Label label = Theme.Caption(caption);
         label.Anchor = AnchorStyles.Left;
-        label.Margin = new Padding(0, 0, 18, 4);
+        label.Margin = new Padding(0, 0, D(18), D(4));
         grid.Controls.Add(label, column, 0);
-        grid.Controls.Add(Theme.Cell(input, new Padding(0, 0, 18, 0)), column, 1);
+        grid.Controls.Add(Theme.Cell(input, new Padding(0, 0, D(18), 0)), column, 1);
     }
 
     private async Task InitializeGpusAsync()
@@ -314,6 +326,93 @@ internal sealed class MainForm : Form
     {
         foreach (Control control in Controls) control.Refresh();
         Refresh();
+    }
+
+    /// <summary>A move to a monitor with a different scale must re-derive every fixed pixel value,
+    /// so the cached DPI ratio is dropped before the new layout pass runs.</summary>
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        float previous = Theme.DpiScale;
+        Theme.ResetDpiCache(e.DeviceDpiNew);
+        float current = Theme.DpiScale;
+        if (previous > 0 && Math.Abs(current - previous) > 0.01f)
+        {
+            float ratio = current / previous;
+            MinimumSize = new Size(
+                Math.Max(1, (int)Math.Round(MinimumSize.Width * ratio)),
+                Math.Max(1, (int)Math.Round(MinimumSize.Height * ratio)));
+            RescaleForDpi(this, current / previous);
+        }
+        base.OnDpiChanged(e);
+    }
+
+    /// <summary>The form opts out of WinForms autoscaling so the theme owns every pixel value, which
+    /// means a monitor change has to rescale the tree by hand. Ratios are applied to sizes,
+    /// margins and padding; fonts are in points and already follow the new DPI.</summary>
+    private static void RescaleForDpi(Control parent, float ratio)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child.Dock == DockStyle.Fill || child.Dock == DockStyle.Bottom || child.Dock == DockStyle.Top
+                || child.Dock == DockStyle.Left || child.Dock == DockStyle.Right)
+            {
+                // A docked control takes its extent from the parent, but its fixed side and
+                // padding still carry design pixels.
+                if (child.Dock is DockStyle.Top or DockStyle.Bottom)
+                {
+                    child.Height = Math.Max(1, (int)Math.Round(child.Height * ratio));
+                }
+                else if (child.Dock is DockStyle.Left or DockStyle.Right)
+                {
+                    child.Width = Math.Max(1, (int)Math.Round(child.Width * ratio));
+                }
+            }
+            else
+            {
+                child.Width = Math.Max(1, (int)Math.Round(child.Width * ratio));
+                child.Height = Math.Max(1, (int)Math.Round(child.Height * ratio));
+            }
+
+            child.Margin = ScalePadding(child.Margin, ratio);
+            child.Padding = ScalePadding(child.Padding, ratio);
+            if (child.MinimumSize.Width > 0 || child.MinimumSize.Height > 0)
+            {
+                child.MinimumSize = new Size(
+                    Math.Max(0, (int)Math.Round(child.MinimumSize.Width * ratio)),
+                    Math.Max(0, (int)Math.Round(child.MinimumSize.Height * ratio)));
+            }
+
+            if (child is TableLayoutPanel table)
+            {
+                foreach (RowStyle row in table.RowStyles)
+                {
+                    if (row.SizeType == SizeType.Absolute) row.Height = Math.Max(1, row.Height * ratio);
+                }
+                foreach (ColumnStyle column in table.ColumnStyles)
+                {
+                    if (column.SizeType == SizeType.Absolute) column.Width = Math.Max(1, column.Width * ratio);
+                }
+            }
+
+            RescaleForDpi(child, ratio);
+        }
+    }
+
+    private static Padding ScalePadding(Padding padding, float ratio) => new(
+        (int)Math.Round(padding.Left * ratio), (int)Math.Round(padding.Top * ratio),
+        (int)Math.Round(padding.Right * ratio), (int)Math.Round(padding.Bottom * ratio));
+
+    /// <summary>WS_EX_COMPOSITED makes Windows compose the whole window off-screen before it is
+    /// blitted. Without it, dragging or resizing leaves half-painted cards and plot fragments
+    /// behind, because the custom-painted children repaint at different moments.</summary>
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+            cp.ExStyle |= 0x02000000;
+            return cp;
+        }
     }
 
     private int SelectedIndex => Math.Max(0, _gpuSelector.SelectedIndex);
@@ -403,7 +502,12 @@ internal sealed class MainForm : Form
         if (_loading) return;
         if (_anchors.Count >= 2)
         {
-            int snapped = SnapToAnchor((int)_mvInput.Value);
+            // A spinner step walks to the neighbouring anchor. Snapping a stepped value back to
+            // the nearest anchor would undo every click, so the arrows would look dead.
+            int target = _mvInput.Stepping
+                ? StepAnchor((int)_mvInput.Value, _mvInput.StepDirection)
+                : SnapToAnchor((int)_mvInput.Value);
+            int snapped = target;
             if (snapped != (int)_mvInput.Value)
             {
                 _loading = true;
@@ -415,6 +519,21 @@ internal sealed class MainForm : Form
         }
 
         MarkUndervoltDirty();
+    }
+
+    /// <summary>The next anchor above or below the given voltage, so the arrows move through the
+    /// card's real V/F points instead of landing on values the curve cannot use.</summary>
+    private int StepAnchor(int mv, int direction)
+    {
+        var ordered = _anchors.OrderBy(a => a.Mv).ToArray();
+        if (direction > 0)
+        {
+            foreach (var anchor in ordered) if (anchor.Mv > mv) return anchor.Mv;
+            return ordered[^1].Mv;
+        }
+
+        for (int i = ordered.Length - 1; i >= 0; i--) if (ordered[i].Mv < mv) return ordered[i].Mv;
+        return ordered[0].Mv;
     }
 
     private void MarkUndervoltDirty()
