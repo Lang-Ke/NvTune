@@ -1,4 +1,4 @@
-<img width="1126" height="893" alt="批注 2026-11-10 130014" src="https://github.com/user-attachments/assets/753364a3-21cd-458e-a518-c6871fd9113d" /># NvTune
+
 
 **NVIDIA GPU 降压 & 多点风扇曲线调节 — Windows 图形界面工具**
 
@@ -23,9 +23,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
   降压看护进程每 20 秒检查一次。
 - **多显卡支持** — 自动识别并列出所有 NVIDIA GPU，按显卡身份保存配置，避免写错卡。
 
-## 📦 下载
 
-从 [Releases](../../releases) 页面下载 `NvTune-win-x64.zip`，解压后运行 `启动器.exe`。
 
 ### 系统要求
 
@@ -67,36 +65,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 
 两者同时开启时共用一个后台进程，内存占用 < 20 MB。
 
-## 🔨 从源码构建
 
-需要 [.NET 10 SDK](https://dotnet.microsoft.com/zh-cn/download)（x64）：
-
-```powershell
-git clone https://github.com/<你的用户名>/NvTune.git
-cd NvTune
-dotnet build src\NvTune.App -c Release
-dotnet publish src\NvTune.App -c Release -r win-x64 --self-contained false -o publish
-```
-
-启动器单独构建（net48，用于在无 .NET 10 环境检测并引导下载）：
-
-```powershell
-dotnet build src\NvTune.Launcher -c Release
-```
-
-## 📁 项目结构
-
-```
-NvTune/
-├── src/
-│   ├── NvTune.App/        主程序（WinForms, .NET 10）
-│   │   ├── MainForm.cs         主界面
-│   │   ├── FanCurveEditor.cs   风扇曲线编辑器
-│   │   ├── Theme.cs            界面配色
-│   │   └── Core/               NVAPI / NVML 交互、持久化、后台进程
-│   └── NvTune.Launcher/   启动器（net48，运行时检测 + 下载引导）
-├── docs/                   截图等文档资源
-└── NvTune.slnx             解决方案
 ```
 
 ## ⚠️ 免责声明
