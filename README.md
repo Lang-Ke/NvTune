@@ -1,8 +1,10 @@
-# NvTune
+<img width="1126" height="893" alt="批注 2026-11-10 130014" src="https://github.com/user-attachments/assets/753364a3-21cd-458e-a518-c6871fd9113d" /># NvTune
 
 **NVIDIA GPU 降压 & 多点风扇曲线调节 — Windows 图形界面工具**
 
-![Uploading 批注 2026-11-10 130014.png…]()
+
+<img width="1126" height="893" alt="批注 2026-11-10 130014" src="https://github.com/user-attachments/assets/157fc8e4-cb11-4a9b-9853-fadb28b7dbd9" />
+
 
 
 NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心降压（电压上限 + 目标频率）
