@@ -881,27 +881,34 @@ internal sealed class MainForm : Form
             || _tempUndervoltCleared.Contains(SelectedIndex) || _tempFanCleared.Contains(SelectedIndex))
         {
             _taskBadge.Text = "本次运行临时生效";
-            _taskBadge.BackColor = Theme.AccentSoft;
-            _taskBadge.ForeColor = Theme.Accent;
+            SetBadgeColors(Theme.Accent);
         }
         else if (registered && hasSettings)
         {
             _taskBadge.Text = "✓  重启自动生效";
-            _taskBadge.BackColor = Theme.SuccessSoft;
-            _taskBadge.ForeColor = Theme.Success;
+            SetBadgeColors(Theme.Success);
         }
         else if (hasSettings)
         {
             _taskBadge.Text = "!  任务未注册";
-            _taskBadge.BackColor = Theme.WarningSoft;
-            _taskBadge.ForeColor = Theme.Warning;
+            SetBadgeColors(Theme.Warning);
         }
         else
         {
             _taskBadge.Text = "未保存配置";
-            _taskBadge.BackColor = Theme.Neutral;
-            _taskBadge.ForeColor = Theme.Muted;
+            // A neutral slate rather than a pale tint: this is the state a fresh install opens
+            // in, so it has to read at a glance without looking like an error.
+            SetBadgeColors(Theme.Mix(Theme.Muted, Theme.Text, 0.55f));
         }
+    }
+
+    /// <summary>The soft tints this badge used to carry sat within a few points of the window
+    /// background, so the state was effectively invisible. A solid fill with white text keeps
+    /// every state legible against the canvas.</summary>
+    private void SetBadgeColors(Color fill)
+    {
+        _taskBadge.BackColor = fill;
+        _taskBadge.ForeColor = Color.White;
     }
 
     private void UpdateDaemonLabel()
