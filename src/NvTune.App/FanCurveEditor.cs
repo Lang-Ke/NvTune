@@ -126,7 +126,9 @@ internal sealed class FanCurveEditor : Control
         }
 
         g.DrawRectangle(axisPen, plot.X, plot.Y, plot.Width, plot.Height);
-        g.DrawString("风扇转速 %", labelFont, textBrush, S(8), S(4));
+        var yAxisCaption = g.MeasureString("风扇转速 %", labelFont);
+        g.DrawString("风扇转速 %", labelFont, textBrush,
+            plot.X - yAxisCaption.Width - S(9), S(4));
         var axisCaption = g.MeasureString("核心温度 °C", labelFont);
         float captionY = plot.Bottom + S(23);
         g.DrawString("核心温度 °C", labelFont, textBrush, plot.Right - axisCaption.Width, captionY);
@@ -204,20 +206,6 @@ internal sealed class FanCurveEditor : Control
             g.DrawString(caption, labelFont, warningBrush, cx, plot.Y + S(7));
         }
 
-        // The hint shares the row under the plot with the axis caption, so it is clipped to the
-        // space left of that caption instead of running underneath it at large font scales.
-        string hint = "双击空白加点 · 双击圆点删点 · 拖动或方向键微调（Shift 加速，最多 12 点）";
-        float hintX = plot.X + S(6);
-        float hintWidth = plot.Right - axisCaption.Width - S(10) - hintX;
-        if (hintWidth > S(80))
-        {
-            using var hintFormat = new StringFormat(StringFormatFlags.NoWrap)
-            {
-                Trimming = StringTrimming.EllipsisCharacter,
-            };
-            g.DrawString(hint, hintFont, mutedBrush,
-                new RectangleF(hintX, plot.Bottom + S(24), hintWidth, hintFont.Height * 2), hintFormat);
-        }
     }
 
     private int? HitTest(Point pos)

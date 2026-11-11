@@ -257,8 +257,8 @@ internal static class Theme
     public static Label Body(string text)
         => new() { Text = text, AutoSize = true, ForeColor = Text, Font = BodyFont() };
 
-    /// <summary>A rounded card with a hairline border and an accent bar beside its title. The card
-    /// paints its own background so the corners stay round; its children sit inside the padding.</summary>
+    /// <summary>A flat card with a hairline border and an accent bar beside its title. Children
+    /// sit inside the padding; the whole window uses the canvas colour so no rounding artefacts.</summary>
     public static Panel Card(string title, out Panel body)
     {
         var card = new BufferedPanel
@@ -271,21 +271,13 @@ internal static class Theme
         };
         card.Paint += (_, e) =>
         {
-            // A resize can hand the panel a near-zero rectangle. Rounded() would then build a
-            // degenerate path and the card would paint as a torn fragment mid-drag.
+            // A resize can hand the panel a near-zero rectangle.
             if (card.Width < 12 || card.Height < 12) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            // A soft drop shadow under the card reads as depth without a heavy border.
-            var shadow = new Rectangle(Scaled(2), Scaled(3), Math.Max(1, card.Width - Scaled(5)),
-                Math.Max(1, card.Height - Scaled(5)));
-            using (GraphicsPath shadowPath = Rounded(shadow, Scaled(14)))
-            using (var shadowBrush = new SolidBrush(Shadow)) e.Graphics.FillPath(shadowBrush, shadowPath);
-
-            var rect = new Rectangle(0, 0, Math.Max(1, card.Width - Scaled(2)), Math.Max(1, card.Height - Scaled(4)));
-            using GraphicsPath path = Rounded(rect, Scaled(12));
-            using (var fill = new SolidBrush(Surface)) e.Graphics.FillPath(fill, path);
+            var rect = new Rectangle(0, 0, card.Width - 1, card.Height - 1);
+            using (var fill = new SolidBrush(Surface)) e.Graphics.FillRectangle(fill, rect);
             using var pen = new Pen(Border);
-            e.Graphics.DrawPath(pen, path);
+            e.Graphics.DrawRectangle(pen, rect);
         };
 
         var heading = new BufferedPanel { Dock = DockStyle.Top, Height = Scaled(38), BackColor = Surface };
@@ -295,9 +287,8 @@ internal static class Theme
             if (bar.Height < Scaled(14)) return;
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var barRect = new Rectangle(0, Scaled(4), Scaled(4), Math.Max(Scaled(6), bar.Height - Scaled(8)));
-            using GraphicsPath barPath = Rounded(barRect, Scaled(2));
             using var gradient = new LinearGradientBrush(barRect, Accent, AccentAlt, 90f);
-            e.Graphics.FillPath(gradient, barPath);
+            e.Graphics.FillRectangle(gradient, barRect);
         };
         heading.Controls.Add(new Label
         {
@@ -531,12 +522,9 @@ internal sealed class DarkNumeric : Control
         using (var clear = new SolidBrush(Parent?.BackColor ?? Theme.Surface)) g.FillRectangle(clear, ClientRectangle);
 
         var field = new Rectangle(0, 0, Math.Max(10, Width - 1), Height - 1);
-        using (GraphicsPath path = Theme.Rounded(field, Theme.Scaled(7)))
-        {
-            using (var fill = new SolidBrush(Theme.Neutral)) g.FillPath(fill, path);
-            using var pen = new Pen(ContainsFocus ? Theme.Accent : Theme.Border);
-            g.DrawPath(pen, path);
-        }
+        using (var fill = new SolidBrush(Theme.Neutral)) g.FillRectangle(fill, field);
+        using var pen = new Pen(ContainsFocus ? Theme.Accent : Theme.Border);
+        g.DrawRectangle(pen, field);
 
         var buttons = new Rectangle(Width - SpinnerWidth, 1, SpinnerWidth - 2, Height - 3);
         using (var divider = new Pen(Theme.Border))
@@ -676,20 +664,19 @@ internal sealed class ModernButton : Button
             fore = Theme.Text;
         }
 
-        using GraphicsPath path = Theme.Rounded(rect, Theme.Scaled(8));
         if (gradient is not null)
         {
-            using (gradient) g.FillPath(gradient, path);
+            using (gradient) g.FillRectangle(gradient, rect);
         }
         else if (solidBack is { } back)
         {
-            using (var fill = new SolidBrush(back)) g.FillPath(fill, path);
+            using (var fill = new SolidBrush(back)) g.FillRectangle(fill, rect);
         }
 
         if (Kind == ButtonKind.Secondary)
         {
             using var pen = new Pen(Theme.Border);
-            g.DrawPath(pen, path);
+            g.DrawRectangle(pen, rect);
         }
 
         TextRenderer.DrawText(g, Text, Font, rect, fore,
