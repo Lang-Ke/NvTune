@@ -27,16 +27,16 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
 
 ## 📦 下载
 
-从 [Releases](../../releases) 按需要选择一个版本，直接双击运行，无需解压。
+从 [Releases](../../releases) 按需要选择一个版本。安装版直接双击运行；便携版先解压到准备长期使用的可写文件夹，再运行其中的程序。
 
 | 版本 | 下载 | 配置和日志位置 | 登录自动应用 |
 |------|------|----------------|--------------|
 | 安装版 | [NvTuneApp.exe](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTuneApp.exe) | `C:\Program Files\NvTune\data` | 运行保存到 Program Files 的程序 |
-| 便携版 | [NvTunePortable.exe](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTunePortable.exe) | EXE 同目录的 `data` | 核验并运行当前便携 EXE |
+| 便携版 | [NvTunePortable-win-x64.zip](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTunePortable-win-x64.zip) | EXE 同目录的 `data` | 核验并运行当前便携 EXE |
 
-每个版本都只有一个 EXE。运行时检测由主程序自带的 .NET 启动宿主处理；主程序 DLL、依赖清单和运行时配置都已嵌入 EXE。更新记录和两份文件的 SHA-256 校验值见 GitHub Release。
+便携 ZIP 解压后得到 `NvTunePortable` 文件夹，内含 `NvTunePortable.exe` 和 `使用说明.txt`；首次运行时生成 `data`，压缩包不预置配置。两个版本的主程序均为单个 EXE。运行时检测由主程序自带的 .NET 启动宿主处理；主程序 DLL、依赖清单和运行时配置都已嵌入 EXE。更新记录及 EXE、ZIP 的 SHA-256 校验值见 GitHub Release。
 
-便携版请放在自己选择的可写文件夹中；安装版点击“保存并开机应用”后会复制到 Program Files。两个版本都会产生配置、日志和运行状态文件。两者共用显卡控制权和一个登录任务，不能同时控制显卡；最后保存的版本负责下次登录自动应用。
+便携版解压后，请在 `NvTunePortable` 文件夹内运行 `NvTunePortable.exe`；安装版点击“保存并开机应用”后会复制到 Program Files。两个版本都会产生配置、日志和运行状态文件。两者共用显卡控制权和一个登录任务，不能同时控制显卡；最后保存的版本负责下次登录自动应用。
 
 ### 系统要求
 
@@ -54,7 +54,7 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
 
 ## 🚀 使用
 
-1. 下载 `NvTuneApp.exe` 或 `NvTunePortable.exe`，双击运行。便携版请放进准备长期使用的可写文件夹。
+1. 下载 `NvTuneApp.exe` 直接运行，或下载 `NvTunePortable-win-x64.zip`，解压到准备长期使用的可写文件夹后，运行其中的 `NvTunePortable/NvTunePortable.exe`。
 2. 在顶部选择显卡，设置目标电压（mV）/ 目标频率 / 显存偏移。
 3. 切换风扇模式：自动、固定转速，或拖动曲线设置温度-转速对应关系。
 4. 点 **「保存并开机应用」** —— 安装版保存到 `C:\Program Files\NvTune`；便携版保存到 EXE 同目录的 `data`，注册对应版本的登录任务。
@@ -65,10 +65,11 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
 便携版升级时，先关闭窗口，在程序所在目录的 PowerShell 中运行下面的命令，安全停止后台；若停止失败会提示原因，请处理后重试。
 
 ```powershell
-Start-Process .\NvTunePortable.exe -ArgumentList '--stop-background' -Wait
+$stop = Start-Process .\NvTunePortable.exe -ArgumentList '--stop-background' -Wait -PassThru
+if ($stop.ExitCode -ne 0) { throw '停止后台失败，请处理提示后重试，暂勿替换程序。' }
 ```
 
-停止后台会交还自动风扇控制，保留配置和登录任务。随后用新版 EXE 替换原文件，保留旁边的 `data`，运行新版后再次点击“保存并开机应用”。登录任务会核验保存时的 EXE 校验值，替换 EXE 后需重新保存才能继续自动应用。
+停止后台会交还自动风扇控制，保留配置和登录任务。随后解压新版 ZIP，用其中的 `NvTunePortable.exe` 和 `使用说明.txt` 替换旧文件，保留原有的 `data` 文件夹，运行新版后再次点击“保存并开机应用”。登录任务会核验保存时的 EXE 校验值，替换 EXE 后需重新保存才能继续自动应用。
 
 首次从旧安装版升级时，请先关闭旧版窗口。便携版会兼容已有旧安装的后台接管，并将原 `C:\Program Files\NvTune\data` 的设置导入便携目录；已有便携配置优先。核对参数后点击“保存并开机应用”，将登录任务切换到当前 EXE。旧安装目录中的文件不会自动删除；升级后请使用新版，避免同时启动不支持全局控制锁的旧版本。
 
@@ -126,13 +127,15 @@ cd NvTune
 dotnet build src\NvTune.App -c Release
 ```
 
-生成与 Release 相同的 Windows x64 单文件主程序：
+生成与 Release 相同的 Windows x64 安装版 EXE 和便携版 ZIP：
 
 ```powershell
 pwsh -File scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
 ```
 
-脚本分别生成安装版 `NvTuneApp.exe` 和便携版 `NvTunePortable.exe`，打印各自 SHA-256 校验值，并验证单文件部署和软件预览自检。无需构建独立启动器或另外打包 ZIP。便携版使用 `-p:Portable=true` 编译开关；默认构建为安装版，重命名 EXE 不会切换版本。
+请使用空的输出目录；若 `artifacts/release` 中仍有旧版产物（例如 `NvTunePortable.exe`），请改用新的空目录。
+
+脚本生成安装版 `NvTuneApp.exe` 和便携版 `NvTunePortable-win-x64.zip`，打印各自 SHA-256 校验值，并验证单文件部署和软件预览自检。便携 ZIP 包含 `NvTunePortable/NvTunePortable.exe` 和 `NvTunePortable/使用说明.txt`，不包含 `data`。无需构建独立启动器或手动打包 ZIP。便携版使用 `-p:Portable=true` 编译开关；默认构建为安装版，重命名 EXE 不会切换版本。
 
 主程序支持 `--version` 查询版本、`--verify-package` 软件自检，以及 `--stop-background` 在关闭窗口后安全停止后台；自检不初始化显卡、不安装程序、不注册计划任务。
 
@@ -146,7 +149,7 @@ NvTune/
 │       ├── FanCurveEditor.cs   风扇曲线编辑器
 │       ├── Theme.cs            界面配色
 │       └── Core/               NVAPI / NVML 交互、持久化、后台进程
-├── scripts/Publish-Release.ps1 单文件发布与校验
+├── scripts/Publish-Release.ps1 EXE / ZIP 发布与校验
 └── NvTune.slnx            解决方案
 ```
 

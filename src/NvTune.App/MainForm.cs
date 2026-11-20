@@ -75,7 +75,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = $"NvTune 1.0.14 · {(Persistence.IsPortable ? "便携版" : "安装版")} · NVIDIA 降压与风扇";
+        Text = $"NvTune 1.0.15 · {(Persistence.IsPortable ? "便携版" : "安装版")} · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);

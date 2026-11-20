@@ -8,6 +8,8 @@ if (args is ["--version"])
 
 if (args is ["--verify-package"])
 {
+    // Redirected output must preserve Unicode executable/data paths on every Windows locale.
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     // Exercise the deployed WinForms assembly without starting GPU control, installing
     // files, or registering a logon task. Also works with no NVIDIA driver installed.
     ApplicationConfiguration.Initialize();

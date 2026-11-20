@@ -24,7 +24,7 @@ jobs:
         run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=true --no-build
       - name: Render the portable edition UI
         run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=true --no-build -- --render-ui artifacts/ui-portable
-      - name: Publish and verify both standalone Windows executables
+      - name: Publish and verify the installed EXE and portable ZIP
         shell: pwsh
         run: ./scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
       - uses: actions/upload-artifact@v4
@@ -32,5 +32,5 @@ jobs:
           name: NvTune-win-x64
           path: |
             artifacts/release/NvTuneApp.exe
-            artifacts/release/NvTunePortable.exe
+            artifacts/release/NvTunePortable-win-x64.zip
           if-no-files-found: error
