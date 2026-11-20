@@ -27,6 +27,10 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 
 从 [Releases](../../releases) 下载 `NvTune-win-x64.zip`。解压后运行 `启动器.exe`。
 
+[直接下载最新版 Windows x64 程序包](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTune-win-x64.zip)
+
+从 1.0.7 起，程序包只保留 `NvTuneApp.exe`、`启动器.exe` 和 `LICENSE`。主程序的 DLL、依赖清单和运行时配置已合入 `NvTuneApp.exe`；更新记录见 GitHub Release 或源码中的 `CHANGELOG.md`。
+
 ### 系统要求
 
 | 项目 | 要求 |
@@ -40,6 +44,8 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 [dotnet.microsoft.com/zh-cn/download](https://dotnet.microsoft.com/zh-cn/download)。
 不需要 SDK、不需要 FanControl 或其它第三方软件。
 
+单文件发布仍依赖本机的 .NET 10 Desktop Runtime（x64）和 NVIDIA 驱动，程序包不包含这些组件。已安装运行时的用户也可以直接运行 `NvTuneApp.exe`。
+
 ## 🚀 使用
 
 1. 解压压缩包到任意文件夹，双击 `启动器.exe`。
@@ -48,6 +54,8 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 4. 点 **「保存并开机应用」** —— 保存到 `C:\Program Files\NvTune`，注册开机任务，重启自动生效。
 5. 移动或删除解压目录不影响已安装的配置。
 
+从旧版更新并保存时，会清理安装目录中不再需要的旧主程序 DLL、JSON 配套文件和 PDB 调试文件，保留 `data` 中的配置。
+
 ### 按钮语义
 
 | 按钮 | 作用 | 重启后 |
@@ -55,7 +63,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 | **本次应用**（降压 / 风扇各一个） | 仅本次运行临时生效 | ✕ 恢复已保存配置 |
 | **恢复默认** | 临时恢复出厂电压 / 风扇 | ✕ 恢复已保存配置 |
 | **保存并开机应用** | 持久保存当前所有设置 | ✓ 自动生效 |
-| **全部恢复出厂** | 清除所有配置、停止后台、删除开机任务 | — |
+| **全部恢复出厂** | 恢复默认调校与自动风扇、清除保存配置、删除开机任务；成功后关闭窗口，后台自行退出 | 不再应用旧设置 |
 
 ### 后台资源
 
@@ -94,17 +102,17 @@ dotnet run --project tests/NvTune.Tests -c Release -- --render-ui artifacts/ui
 git clone https://github.com/Lang-Ke/NvTune.git
 cd NvTune
 dotnet build src\NvTune.App -c Release
-dotnet publish src\NvTune.App -c Release -r win-x64 --self-contained false -o publish
 ```
 
-启动器单独构建（net48，用于在没有 .NET 10 的机器上检测并引导下载）：
+生成与 Release 相同的 Windows x64 程序包：
 
 ```powershell
-dotnet build src\NvTune.Launcher -c Release
+pwsh -File scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
 ```
 
-打包发布目录时，把 `publish` 里的 `NvTuneApp.*` 与 `启动器.exe`、`使用说明.txt`
-放在同一层，再压缩即可。
+输出 `NvTune-win-x64.zip` 和 `SHA256SUMS.txt`。脚本发布单文件主程序、构建 net48 启动器，并只将上述三个文件放入 ZIP。启动器用于在没有 .NET 10 的机器上检测并引导下载。
+
+主程序支持 `--version` 查询版本和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
 
 ## 📁 项目结构
 

@@ -318,6 +318,115 @@ internal static class Program
                 Check(Directory.GetFiles(dir, "*.tmp").Length == 0);
             });
         });
+        Run("Single-file installation removes only obsolete program companions", () =>
+        {
+            WithTemp(dir =>
+            {
+                string source = Path.Combine(dir, "source"), target = Path.Combine(dir, "installed");
+                Directory.CreateDirectory(source);
+                Directory.CreateDirectory(Path.Combine(source, "data"));
+                Directory.CreateDirectory(Path.Combine(target, "data"));
+                string[] companions = { "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json", "NvTuneApp.pdb" };
+                File.WriteAllText(Path.Combine(source, "NvTuneApp.exe"), "new bundled program");
+                File.WriteAllText(Path.Combine(target, "NvTuneApp.exe"), "old program");
+                foreach (string name in companions)
+                {
+                    // Simulate extracting the bundle into an older portable program folder.
+                    File.WriteAllText(Path.Combine(source, name), "stray portable companion");
+                    File.WriteAllText(Path.Combine(target, name), "old installed companion");
+                }
+                File.WriteAllText(Path.Combine(source, "NvTuneApp.extra.json"), "not an installation file");
+                File.WriteAllText(Path.Combine(target, "NvTuneApp.custom.json"), "preserve unknown file");
+                File.WriteAllText(Path.Combine(target, "LICENSE"), "preserve license");
+                File.WriteAllText(Path.Combine(source, "data", "fan.json"), "portable old settings");
+                File.WriteAllText(Path.Combine(source, "data", "fan.gpu1.json"), "portable new settings");
+                File.WriteAllText(Path.Combine(target, "data", "fan.json"), "installed settings");
+                File.WriteAllText(Path.Combine(target, "data", "daemon.pid"), "123");
+
+                ProgramInstallation.Install(source, target, singleFile: true);
+
+                Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.exe")) == "new bundled program");
+                Check(companions.All(name => !File.Exists(Path.Combine(target, name))));
+                Check(companions.All(name => File.Exists(Path.Combine(source, name))));
+                Check(!File.Exists(Path.Combine(target, "NvTuneApp.extra.json")));
+                Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.custom.json")) == "preserve unknown file");
+                Check(File.ReadAllText(Path.Combine(target, "LICENSE")) == "preserve license");
+                Check(File.ReadAllText(Path.Combine(target, "data", "fan.json")) == "installed settings");
+                Check(File.ReadAllText(Path.Combine(target, "data", "fan.gpu1.json")) == "portable new settings");
+                Check(File.ReadAllText(Path.Combine(target, "data", "daemon.pid")) == "123");
+            });
+        });
+        Run("Multi-file installation copies every required runtime file", () =>
+        {
+            WithTemp(dir =>
+            {
+                string source = Path.Combine(dir, "source"), target = Path.Combine(dir, "installed");
+                Directory.CreateDirectory(source);
+                Directory.CreateDirectory(target);
+                string[] required = { "NvTuneApp.exe", "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json" };
+                foreach (string name in required) File.WriteAllText(Path.Combine(source, name), "new " + name);
+                File.WriteAllText(Path.Combine(target, "NvTuneApp.pdb"), "old debug symbols");
+                File.WriteAllText(Path.Combine(source, "NvTuneApp.extra.dll"), "unrelated file");
+                var copied = new List<string>();
+
+                ProgramInstallation.Install(source, target, singleFile: false, copied.Add);
+
+                Check(required.All(name => File.ReadAllText(Path.Combine(target, name)) == "new " + name));
+                Check(copied.Select(Path.GetFileName).SequenceEqual(required));
+                Check(!File.Exists(Path.Combine(target, "NvTuneApp.pdb")));
+                Check(!File.Exists(Path.Combine(target, "NvTuneApp.extra.dll")));
+            });
+        });
+        Run("Incomplete installation sources leave existing programs and data intact", () =>
+        {
+            WithTemp(dir =>
+            {
+                string[] required = { "NvTuneApp.exe", "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json" };
+                foreach (string missing in required)
+                {
+                    string caseDir = Path.Combine(dir, missing);
+                    string source = Path.Combine(caseDir, "source"), target = Path.Combine(caseDir, "installed");
+                    Directory.CreateDirectory(source);
+                    Directory.CreateDirectory(Path.Combine(target, "data"));
+                    foreach (string name in required)
+                    {
+                        if (name != missing) File.WriteAllText(Path.Combine(source, name), "new " + name);
+                        File.WriteAllText(Path.Combine(target, name), "installed " + name);
+                    }
+                    File.WriteAllText(Path.Combine(target, "NvTuneApp.pdb"), "keep debug symbols on failure");
+                    File.WriteAllText(Path.Combine(target, "data", "fan.json"), "keep configuration");
+
+                    Throws(() => ProgramInstallation.Install(source, target, singleFile: false));
+                    Check(required.All(name => File.ReadAllText(Path.Combine(target, name)) == "installed " + name));
+                    Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.pdb")) == "keep debug symbols on failure");
+                    Check(File.ReadAllText(Path.Combine(target, "data", "fan.json")) == "keep configuration");
+                    if (missing == "NvTuneApp.exe")
+                    {
+                        Throws(() => ProgramInstallation.Install(source, target, singleFile: true));
+                        Check(required.All(name => File.ReadAllText(Path.Combine(target, name)) == "installed " + name));
+                        string absentTarget = Path.Combine(caseDir, "absent");
+                        Throws(() => ProgramInstallation.Install(source, absentTarget, singleFile: true));
+                        Check(!Directory.Exists(absentTarget));
+                    }
+                }
+            });
+        });
+        Run("A failed program copy never triggers obsolete-file cleanup", () =>
+        {
+            WithTemp(dir =>
+            {
+                string source = Path.Combine(dir, "source"), target = Path.Combine(dir, "installed");
+                Directory.CreateDirectory(source);
+                Directory.CreateDirectory(target);
+                File.WriteAllText(Path.Combine(source, "NvTuneApp.exe"), "new bundled program");
+                File.WriteAllText(Path.Combine(target, "NvTuneApp.exe"), "old program");
+                File.WriteAllText(Path.Combine(target, "NvTuneApp.dll"), "old runtime file");
+                using var locked = new FileStream(Path.Combine(target, "NvTuneApp.exe"), FileMode.Open, FileAccess.Read, FileShare.Read);
+
+                Throws(() => ProgramInstallation.Install(source, target, singleFile: true));
+                Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.dll")) == "old runtime file");
+            });
+        });
         Run("A crashed owner releases control to the next process", () =>
         {
             WithTemp(dir =>

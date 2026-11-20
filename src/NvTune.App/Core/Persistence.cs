@@ -16,6 +16,12 @@ internal static class Persistence
     /// <summary>The folder this process was started from (the unzipped folder during a first run).</summary>
     public static string SourceDir() => AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
 
+    // A bundled managed assembly has no separate location. This is only a layout check;
+    // executable and installation paths continue to use ProcessPath and BaseDirectory.
+#pragma warning disable IL3000
+    internal static bool IsSingleFile => typeof(Persistence).Assembly.Location.Length == 0;
+#pragma warning restore IL3000
+
     public static string InstallDir()
         => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), FolderName);
 
@@ -93,37 +99,9 @@ internal static class Persistence
 
         string source = SourceDir();
         string target = InstallDir();
-        Directory.CreateDirectory(target);
         // The GUI holds HardwareControlLease and has cooperatively stopped the daemon.
         // Do not kill other windows or interrupt an in-flight hardware write during installation.
-
-        foreach (string file in Directory.GetFiles(source, "NvTuneApp.*"))
-        {
-            if (file.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string copy = Path.Combine(target, Path.GetFileName(file));
-            File.Copy(file, copy, overwrite: true);
-            RemoveMarkOfTheWeb(copy);
-        }
-
-        // Carry a config saved by an earlier portable build over, so updating does not lose it.
-        string oldData = Path.Combine(source, "data");
-        if (Directory.Exists(oldData))
-        {
-            string newData = Path.Combine(target, "data");
-            Directory.CreateDirectory(newData);
-            foreach (string file in Directory.GetFiles(oldData, "*.json"))
-            {
-                string copy = Path.Combine(newData, Path.GetFileName(file));
-                if (!File.Exists(copy))
-                {
-                    try { File.Copy(file, copy); } catch (Exception ex) { Diag.Log("迁移配置失败: " + ex.Message); }
-                }
-            }
-        }
+        ProgramInstallation.Install(source, target, IsSingleFile, RemoveMarkOfTheWeb, Diag.Log);
 
         Diag.Log($"已安装到 {target}");
         return target;

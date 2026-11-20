@@ -74,7 +74,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = "NvTune 1.0.6 · NVIDIA 降压与风扇";
+        Text = "NvTune 1.0.7 · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);
@@ -692,6 +692,7 @@ internal sealed partial class MainForm : Form
 
     private void UpdateDaemonLabel()
     {
+        if (_preview) return;
         bool running = DaemonControl.IsRunning();
         bool curve = HasSavedFanCurve();
         bool undervolt = HasSavedUndervolt();
