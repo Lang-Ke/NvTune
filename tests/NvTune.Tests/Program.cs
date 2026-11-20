@@ -40,6 +40,46 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         UiChecks.Register(Run, Check);
+        Run("Hotspot decodes signed fixed-point sensor data without estimating from the core", () =>
+        {
+            var reading = HotspotReading.Read(0x160, () => (0, 65 * 256 + 128));
+            Check(reading.Celsius == 65.5 && reading.ValueText == "65.5" && reading.Note == "");
+            Check(HotspotReading.FromDriver(0, 0).Celsius is null);
+            Check(HotspotReading.FromDriver(0, 0).Note.Length > 0);
+        });
+        Run("Unknown and Blackwell sensor mappings never masquerade as hotspot data", () =>
+        {
+            foreach (uint? architecture in new uint?[] { null, 0x110, 0x180, 0x1B0, 0x1C0 })
+            {
+                bool called = false;
+                var reading = HotspotReading.Read(architecture, () => { called = true; return (0, 57 * 256); });
+                Check(!called && reading.Celsius is null && reading.Note.Length > 0 && reading.Details.Length > 0);
+            }
+            foreach (uint architecture in new uint[] { 0x130, 0x140, 0x150, 0x160, 0x170, 0x190 })
+                Check(HotspotReading.Read(architecture, () => (0, 70 * 256)).Celsius == 70);
+        });
+        Run("Unsupported, incompatible and invalid hotspot samples explain their missing value", () =>
+        {
+            foreach (var reading in new[] { HotspotReading.FromDriver(-3, 65 * 256),
+                HotspotReading.FromDriver(-104, 65 * 256), HotspotReading.FromDriver(-136, 65 * 256),
+                HotspotReading.FromDriver(-121, 65 * 256), HotspotReading.FromDriver(-9, 65 * 256),
+                HotspotReading.FromDriver(-1, 65 * 256), HotspotReading.FromDriver(0, -256),
+                HotspotReading.FromDriver(0, int.MaxValue), HotspotReading.Readout(double.NaN),
+                HotspotReading.Readout(double.PositiveInfinity) })
+                Check(reading.Celsius is null && reading.ValueText == "—" && reading.Note.Length > 0 && reading.Details.Length > 0);
+        });
+        Run("Hotspot failures are isolated and recover on the next successful read", () =>
+        {
+            bool fail = true;
+            (int Status, int RawTemperature) ReadSensor() => fail ? throw new IOException("driver reset") : (0, 70 * 256);
+            foreach (int transientStatus in new[] { -10, -220, -221 })
+                Check(HotspotReading.FromDriver(transientStatus, 65 * 256).Note == "读取失败");
+            var failed = HotspotReading.Read(0x170, ReadSensor);
+            Check(failed.Celsius is null && failed.Note == "读取失败" && failed.Details.Contains("driver reset"));
+            Check(HotspotReading.Read(0x190, () => (0, 75 * 256)).Celsius == 75);
+            fail = false;
+            Check(HotspotReading.Read(0x170, ReadSensor).Celsius == 70);
+        });
         Run("Fan readout preserves a target below the reported percentage", () =>
         {
             var sample = new FanTelemetry(0, 45, 22, 2151, FanApi.PolicyAuto);

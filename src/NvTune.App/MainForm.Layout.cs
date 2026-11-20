@@ -6,16 +6,19 @@ internal sealed partial class MainForm
 {
     private Panel _viewport = null!;
     private TableLayoutPanel _content = null!;
-    private readonly MetricTile[] _metrics =
-    {
-        new("GPU 温度", "°C", Theme.Accent), new("风扇读数", "%", Theme.AccentAlt),
-        new("板卡功耗", "W", Theme.Warning), new("核心频率", "MHz", Theme.AccentAlt),
-        new("核心电压", "mV", Theme.Accent),
-    };
+    private readonly MetricTile _gpuTempMetric = new("GPU 温度", "°C", Theme.Accent);
+    private readonly MetricTile _hotspotMetric = new("热点温度", "", Theme.Warning);
+    private readonly MetricTile _fanMetric = new("风扇读数", "%", Theme.AccentAlt);
+    private readonly MetricTile _powerMetric = new("板卡功耗", "W", Theme.Warning);
+    private readonly MetricTile _clockMetric = new("核心频率", "MHz", Theme.AccentAlt);
+    private readonly MetricTile _voltageMetric = new("核心电压", "mV", Theme.Accent);
+    private MetricTile[] _metrics = null!;
     private readonly ToolTip _tips = new();
 
     private void BuildLayout()
     {
+        _metrics = new[] { _gpuTempMetric, _hotspotMetric, _fanMetric, _powerMetric, _clockMetric, _voltageMetric };
+        UpdateHotspotMetric(HotspotReading.Waiting);
         var shell = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
@@ -36,15 +39,15 @@ internal sealed partial class MainForm
             _content.RowStyles.Add(new RowStyle(SizeType.Absolute, D(height)));
         _content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _content.Controls.Add(BuildHeader(), 0, 0);
-        var metrics = Theme.Table(5, 1);
+        var metrics = Theme.Table(_metrics.Length, 1);
         metrics.BackColor = Theme.Canvas;
         metrics.Margin = new Padding(0, 0, 0, D(10));
         metrics.ColumnStyles.Clear();
         for (int i = 0; i < _metrics.Length; i++)
         {
-            metrics.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+            metrics.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / _metrics.Length));
             _metrics[i].Dock = DockStyle.Fill;
-            _metrics[i].Margin = new Padding(0, 0, i == 4 ? 0 : D(12), 0);
+            _metrics[i].Margin = new Padding(0, 0, i == _metrics.Length - 1 ? 0 : D(10), 0);
             metrics.Controls.Add(_metrics[i], i, 0);
         }
         _content.Controls.Add(metrics, 0, 1);
@@ -216,8 +219,21 @@ internal sealed partial class MainForm
 
     private void UpdateMetrics(uint temp, uint fan, uint watts, uint clock, uint mv)
     {
-        uint[] values = { temp, fan, watts, clock, mv };
-        for (int i = 0; i < values.Length; i++) _metrics[i].Value = values[i].ToString();
+        _gpuTempMetric.Value = temp.ToString();
+        _fanMetric.Value = fan.ToString();
+        _powerMetric.Value = watts.ToString();
+        _clockMetric.Value = clock.ToString();
+        _voltageMetric.Value = mv.ToString();
+    }
+
+    internal void UpdateHotspotMetric(HotspotReading reading)
+    {
+        _hotspotMetric.Value = reading.ValueText;
+        _hotspotMetric.Unit = reading.Celsius is not null ? "°C" : "";
+        _hotspotMetric.Note = reading.Note;
+        _hotspotMetric.AccessibleName = "热点温度";
+        _hotspotMetric.AccessibleDescription = reading.Details;
+        _tips.SetToolTip(_hotspotMetric, reading.Details);
     }
 
     internal void PopulatePreview()
@@ -231,8 +247,9 @@ internal sealed partial class MainForm
         _curveEditor.SetPoints(FanCurve.Default.Points);
         _curveEditor.CurrentTemp = 57;
         UpdateMetrics(57, 42, 148, 2700, 950);
-        _metrics[1].Value = "1200";
-        _metrics[1].Unit = "RPM";
+        _fanMetric.Value = "1200";
+        _fanMetric.Unit = "RPM";
+        UpdateHotspotMetric(HotspotReading.Readout(65.5));
         _daemonLabel.Text = "设定 42% · F1 读数 45% · 目标 42% · 1200 RPM · 手动";
         _daemonLabel.ForeColor = Theme.Accent;
         _taskBadge.Text = "配置已保存";

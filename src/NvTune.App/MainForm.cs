@@ -74,7 +74,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = "NvTune 1.0.9 · NVIDIA 降压与风扇";
+        Text = "NvTune 1.0.10 · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);
@@ -157,6 +157,7 @@ internal sealed partial class MainForm : Form
             _guiLease?.Dispose();
             _guiLease = null;
             _gpus = Array.Empty<IntPtr>();
+            UpdateHotspotMetric(HotspotReading.MonitoringUnavailable);
             SetStatus("初始化失败: " + ex.Message, Theme.Danger);
             Diag.Log("初始化失败: " + ex);
         }
@@ -617,7 +618,13 @@ internal sealed partial class MainForm : Form
     private void UpdateLiveStatus()
     {
         IntPtr gpu = SelectedGpuHandle;
-        if (gpu == IntPtr.Zero || !FanRunner.TryDevice(SelectedIndex, out IntPtr dev)) return;
+        if (gpu == IntPtr.Zero)
+        {
+            UpdateHotspotMetric(HotspotReading.MonitoringUnavailable);
+            return;
+        }
+        UpdateHotspotMetric(NvApi.GetHotspotTemperature(gpu));
+        if (!FanRunner.TryDevice(SelectedIndex, out IntPtr dev)) return;
         try
         {
             uint temp = FanRunner.TemperatureC(dev);
@@ -628,15 +635,15 @@ internal sealed partial class MainForm : Form
             _curveEditor.CurrentTemp = (int)temp;
             UpdateMetrics(temp, 0, power / 1000, coreMhz, mv);
             var first = fans.FirstOrDefault();
-            _metrics[1].Value = first?.Value ?? "—";
-            _metrics[1].Unit = first?.Unit ?? "%";
+            _fanMetric.Value = first?.Value ?? "—";
+            _fanMetric.Unit = first?.Unit ?? "%";
             int? request = _fanController.RequestedPercent(SelectedIndex);
             var range = FanApi.GetFanRange(dev);
             string rangeText = range is { } r ? $"手动范围 {r.Minimum}–{r.Maximum}%" : "手动范围未提供";
             string requestText = request is { } requested ? $"设定 {requested}% · " : "";
             _fanSummary = requestText + (first?.Summary ?? "风扇读数不可用");
             string details = requestText + rangeText + Environment.NewLine + string.Join(Environment.NewLine, fans.Select(f => f.Summary));
-            _tips.SetToolTip(_metrics[1], details);
+            _tips.SetToolTip(_fanMetric, details);
             _tips.SetToolTip(_daemonLabel, details);
             _tips.SetToolTip(_fanFixed, rangeText + "。低于范围的设定由驱动允许的最低值执行；0% 不保证停转。");
             UpdateDaemonLabel();
@@ -645,7 +652,8 @@ internal sealed partial class MainForm : Form
         {
             _fanSummary = null;
             _curveEditor.CurrentTemp = -1;
-            foreach (var metric in _metrics) metric.Value = "—";
+            foreach (var metric in _metrics)
+                if (metric != _hotspotMetric) metric.Value = "—";
             SetStatus("监测暂不可用，正在等待驱动恢复。", Theme.Warning);
         }
     }

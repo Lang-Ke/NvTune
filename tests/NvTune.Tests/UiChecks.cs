@@ -18,6 +18,20 @@ internal static class UiChecks
             using var form = new MainForm(Array.Empty<string>(), preview: true);
             check(form.ClientSize.Width <= 960 && form.ClientSize.Height <= 760);
         });
+        run("Unavailable hotspot explains the missing reading and clears stale temperature", () =>
+        {
+            using var form = new MainForm(Array.Empty<string>(), preview: true);
+            var hotspot = Field<MetricTile>(form, "_hotspotMetric");
+            var core = Field<MetricTile>(form, "_gpuTempMetric");
+            core.Value = "57";
+            form.UpdateHotspotMetric(HotspotReading.Readout(65.5));
+            check(hotspot.Value == "65.5" && hotspot.Unit == "°C" && hotspot.Note.Length == 0);
+            form.UpdateHotspotMetric(HotspotReading.NotSupported("当前显卡驱动没有提供可识别的热点传感器。"));
+            check(hotspot.Value == "—" && hotspot.Unit.Length == 0 && hotspot.Note.Length > 0);
+            check(hotspot.AccessibleDescription!.Contains("热点传感器") && core.Value == "57");
+            form.UpdateHotspotMetric(HotspotReading.Readout(66));
+            check(hotspot.Value == "66" && hotspot.Unit == "°C" && hotspot.Note.Length == 0);
+        });
         run("Dark palette provides readable text and muted captions", () =>
         {
             check(Contrast(Theme.Text, Theme.Surface) >= 7);
@@ -158,6 +172,19 @@ internal static class UiChecks
             CheckLayout(large, 1);
             Console.WriteLine("PASS 3840x2050 at 100%: plot expands with the viewport");
         }
+        using (var unavailable = new MainForm(Array.Empty<string>(), preview: true) { AutoScaleMode = AutoScaleMode.None, FormBorderStyle = FormBorderStyle.None, MaximumSize = new Size(12000, 12000), ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-15000, -15000) })
+        {
+            unavailable.ClientSize = new Size(860, 760);
+            unavailable.Show();
+            unavailable.UpdateHotspotMetric(HotspotReading.NotSupported("当前显卡驱动未提供可识别的热点温度；此处不会用 GPU 核心温度代替。"));
+            Field<MetricTile>(unavailable, "_fanMetric").Value = "12000";
+            LayoutTree(unavailable);
+            CheckLayout(unavailable, 1);
+            using var bitmap = new Bitmap(unavailable.Width, unavailable.Height);
+            unavailable.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+            bitmap.Save(Path.Combine(directory, "nvtune-dark-hotspot-unavailable-100.png"), ImageFormat.Png);
+            Console.WriteLine("PASS 860x760 at 100%: missing hotspot explanation and six metrics fit");
+        }
         Theme.DpiScaleOverride = null;
         return 0;
     }
@@ -170,6 +197,17 @@ internal static class UiChecks
         var content = Field<TableLayoutPanel>(form, "_content");
         var viewport = Field<Panel>(form, "_viewport");
         var plot = Field<FanCurveEditor>(form, "_curveEditor");
+        var metrics = Field<MetricTile[]>(form, "_metrics");
+        foreach (var metric in metrics)
+        {
+            if (metric.Parent is null || !metric.Parent.ClientRectangle.Contains(metric.Bounds)
+                || metric.Width < 112 * scale || metric.Height < 64 * scale)
+                throw new Exception("Metric tile clipped");
+        }
+        for (int i = 1; i < metrics.Length; i++)
+            if (metrics[i - 1].Bounds.IntersectsWith(metrics[i].Bounds)
+                || metrics[i - 1].Left >= metrics[i].Left)
+                throw new Exception("Metric tiles overlap or change order");
         if (plot.Width < 360 * scale || plot.Height < 170 * scale) throw new Exception("Plot clipped");
         foreach (string field in new[] { "_mvInput", "_mhzInput", "_memInput" })
         {

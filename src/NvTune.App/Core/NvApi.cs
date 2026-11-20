@@ -50,6 +50,9 @@ internal static class NvApi
     /// <summary>NvAPI_GPU_GetThermalSettings — current temperatures. Takes a sensor-index arg.</summary>
     private const uint ID_GPU_GetThermalSettings = 0xE3640A56;
 
+    /// <summary>Private GetThermalSensors V2. Channel meaning depends on the GPU architecture.</summary>
+    private const uint ID_GPU_GetThermalSensors = 0x65FE3AAD;
+
     /// <summary>ClientPowerTopologyGetStatus — live board power draw (per-mille of percent of TGP).</summary>
     private const uint ID_GPU_GetPowerTopologyStatus = 0xEDCF624E;
 
@@ -327,6 +330,30 @@ internal static class NvApi
         {
             Marshal.FreeHGlobal(buffer);
         }
+    }
+
+    /// <summary>Read only the known hotspot channel; unsupported telemetry never fails the main poll.</summary>
+    public static HotspotReading GetHotspotTemperature(IntPtr gpu)
+    {
+        if (gpu == IntPtr.Zero) return HotspotReading.MonitoringUnavailable;
+        return HotspotReading.Read(ArchitectureId(gpu), () =>
+        {
+            IntPtr address = NvAPI_QueryInterface(ID_GPU_GetThermalSensors);
+            if (address == IntPtr.Zero) return (-3, 0);
+            var read = Marshal.GetDelegateForFunctionPointer<GpuStructDelegate>(address);
+            // NvThermalSensors: version, request mask, reserved[8], signed temperatures[32].
+            // https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/master/LibreHardwareMonitorLib/Interop/NvApi.cs
+            const int size = 168;
+            IntPtr buffer = AllocZeroed(size);
+            try
+            {
+                Marshal.WriteInt32(buffer, MakeVersion(size, 2));
+                Marshal.WriteInt32(buffer, 4, 0x3); // Request channels 0 and 1, no unrelated sensors.
+                int status = read(gpu, buffer);
+                return (status, status == 0 ? Marshal.ReadInt32(buffer, 44) : 0);
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        });
     }
 
     /// <summary>The live board power draw as a percentage of the total power limit (TGP). The power
