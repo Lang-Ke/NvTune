@@ -121,10 +121,11 @@ internal sealed partial class MainForm
     }
     private Control BuildUndervoltCard()
     {
-        var card = Theme.Card("01   核心降压", out var body);
-        var grid = Theme.Table(5, 2);
+        var card = Theme.Card("核心降压", out var body);
+        var grid = Theme.Table(6, 2);
         grid.ColumnStyles.Clear();
-        for (int i = 0; i < 3; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+        for (int i = 0; i < 3; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(144)));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(142)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(126)));
         grid.RowStyles.Clear();
@@ -135,15 +136,15 @@ internal sealed partial class MainForm
         AddField(grid, 2, "显存偏移 · MHz", _memInput);
         var apply = Theme.PrimaryButton("本次应用", (_, _) => ApplyUndervolt());
         _tips.SetToolTip(apply, "临时应用降压，关闭软件后恢复保存的配置");
-        grid.Controls.Add(Theme.Cell(apply, new Padding(D(12), 0, 0, 0)), 3, 1);
-        grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()), new Padding(D(12), 0, 0, 0)), 4, 1);
+        grid.Controls.Add(Theme.Cell(apply, new Padding(D(12), 0, 0, 0)), 4, 1);
+        grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()), new Padding(D(12), 0, 0, 0)), 5, 1);
         body.Controls.Add(grid);
         return card;
     }
 
     private Control BuildFanCard()
     {
-        var card = Theme.Card("02   风扇曲线", out var body);
+        var card = Theme.Card("风扇曲线", out var body);
         var top = Theme.Table(5, 1);
         top.Dock = DockStyle.Top;
         top.Height = D(44);
@@ -211,7 +212,8 @@ internal sealed partial class MainForm
         label.Margin = Padding.Empty;
         grid.Controls.Add(label, column, 0);
         input.Dock = DockStyle.None;
-        input.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        input.Anchor = AnchorStyles.Left;
+        input.Width = D(128);
         input.Height = D(36);
         input.Margin = new Padding(0, 0, D(16), 0);
         grid.Controls.Add(input, column, 1);
