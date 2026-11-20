@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/NvTune.Tests/NvTune.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/NvTune.App/">
     <Project Path="src/NvTune.App/NvTune.csproj" />

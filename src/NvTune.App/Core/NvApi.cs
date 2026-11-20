@@ -23,6 +23,7 @@ internal static class NvApi
     private const uint ID_EnumPhysicalGPUs = 0xE5AC921F;
     private const uint ID_GPU_GetFullName = 0xCEEE8E9F;
     private const uint ID_GPU_GetPCIIdentifiers = 0x2DDFB66E;
+    private const uint ID_GPU_GetBusId = 0x1BE0B8E5;
 
     private const uint ID_GPU_GetPstates20 = 0x6FF81213;
     private const uint ID_GPU_SetPstates20 = 0x0F4DAE6B;
@@ -79,6 +80,8 @@ internal static class NvApi
         out uint deviceId, out uint subSystemId, out uint revisionId, out uint extDeviceId);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int GpuStructDelegate(IntPtr gpu, IntPtr data);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int GpuUintDelegate(IntPtr gpu, out uint value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int GpuThermalDelegate(IntPtr gpu, uint sensorIndex, IntPtr data);
 
@@ -143,6 +146,12 @@ internal static class NvApi
         Check(GetDelegate<EnumPhysicalGpusDelegate>(ID_EnumPhysicalGPUs)(handles, out int count),
             "NvAPI_EnumPhysicalGPUs");
         return handles.Take(count).ToArray();
+    }
+
+    public static uint GetBusId(IntPtr gpu)
+    {
+        Check(GetDelegate<GpuUintDelegate>(ID_GPU_GetBusId)(gpu, out uint bus), "NvAPI_GPU_GetBusId");
+        return bus;
     }
 
     private static string GetFullName(IntPtr gpu)

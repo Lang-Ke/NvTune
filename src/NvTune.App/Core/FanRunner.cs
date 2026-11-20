@@ -1,10 +1,10 @@
-﻿namespace SimpleNvidiaUndervolt;
+namespace SimpleNvidiaUndervolt;
 
 /// <summary>
 /// NVML fan control, plus the mapping between NVAPI's GPU enumeration (which keys every saved
 /// document) and NVML's device list (which is what actually sets fan speed). The two enumerations
-/// are not guaranteed to share an order on a multi-GPU machine, so devices are matched by model
-/// name first and by index only as a fallback.
+/// are not guaranteed to share an order on a multi-GPU machine, so devices are matched by
+/// physical PCI bus ID, refusing ambiguous matches.
 /// </summary>
 internal static class FanRunner
 {
@@ -13,74 +13,68 @@ internal static class FanRunner
 
     private static readonly object Gate = new();
     private static readonly Dictionary<int, IntPtr> Map = new();
-    private static bool _initialized;
-    private static int _nvapiCount = -1;
-
-    /// <summary>Opens NVML and pairs its devices with the NVAPI enumeration.</summary>
-    public static void Initialize(int nvapiGpuCount)
+    public static int[] MappedIndexes() { lock (Gate) return Map.Keys.ToArray(); }
+    /// <summary>Rebuild mappings from physical PCI bus IDs; never guess by name or enumeration.
+    /// Ambiguous bus IDs (e.g. multiple PCI domains) are deliberately left unmapped.</summary>
+    public static void Initialize()
     {
         lock (Gate)
         {
-            if (_initialized && _nvapiCount == nvapiGpuCount) return;
-
             FanApi.Initialize();
-            Map.Clear();
-            _nvapiCount = nvapiGpuCount;
-
+            var devices = new List<(int Index, uint Bus, IntPtr Handle)>();
+            bool complete = true;
             int count = FanApi.GetDeviceCount();
-            var nvml = new List<(int Index, IntPtr Handle, string Name)>();
             for (int i = 0; i < count; i++)
             {
                 try
                 {
                     IntPtr dev = FanApi.GetDevice((uint)i);
-                    nvml.Add((i, dev, Normalize(FanApi.GetDeviceName(dev))));
+                    devices.Add((i, FanApi.GetBusId(dev), dev));
                 }
-                catch (Exception ex)
-                {
-                    Diag.Log($"NVML 打开 GPU {i} 失败: {ex.Message}");
-                }
+                catch (Exception ex) { complete = false; Diag.Log($"NVML 打开 GPU {i} 失败: {ex.Message}"); }
             }
-
             IntPtr[] gpus = NvApi.EnumeratePhysicalGpus();
-            var used = new HashSet<int>();
-            for (int nvapi = 0; nvapi < gpus.Length; nvapi++)
+            var buses = new List<(int Index, uint Bus)>();
+            for (int i = 0; i < gpus.Length; i++)
             {
-                string name = Normalize(NvApi.SafeFullName(gpus[nvapi]));
-                int index = nvml.Where(d => !used.Contains(d.Index)
-                    && d.Name.Length > 0 && name.Length > 0
-                    && (d.Name == name || d.Name.Contains(name) || name.Contains(d.Name)))
-                    .Select(d => d.Index)
-                    .DefaultIfEmpty(-1)
-                    .First();
-
-                if (index < 0 && nvapi < count && !used.Contains(nvapi))
-                {
-                    index = nvapi;
-                }
-
-                if (index < 0)
-                {
-                    index = nvml.Where(d => !used.Contains(d.Index)).Select(d => d.Index).DefaultIfEmpty(-1).First();
-                }
-
-                if (index < 0)
-                {
-                    Diag.Log($"GPU {nvapi} 找不到对应的 NVML 设备。");
-                    continue;
-                }
-
-                used.Add(index);
-                Map[nvapi] = nvml.First(d => d.Index == index).Handle;
+                try { buses.Add((i, NvApi.GetBusId(gpus[i]))); }
+                catch (Exception ex) { complete = false; Diag.Log($"读取 GPU {i} 总线失败: {ex.Message}"); }
             }
-
-            _initialized = true;
+            Map.Clear();
+            if (!complete) throw new CliError("显卡 PCI 地址枚举不完整，无法核实唯一匹配，将重试。");
+            foreach (var (index, nvmlIndex) in GpuBusMapping.Match(buses, devices.Select(d => (d.Index, d.Bus))))
+                Map[index] = devices.Single(d => d.Index == nvmlIndex).Handle;
+            foreach (var (index, _) in buses.Where(b => !Map.ContainsKey(b.Index)))
+                Diag.Log($"GPU {index} 无法唯一匹配 NVML 设备，已禁用该卡的风扇写入。");
         }
     }
 
-    private static string Normalize(string name)
-        => new string(name.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+    public static FanController CreateController() => new(new DriverBackend(), Diag.Log);
 
+    private sealed class DriverBackend : IFanBackend
+    {
+        public int TemperatureC(int index) => checked((int)FanRunner.TemperatureC(Device(index)));
+        public void SetPercent(int index, int percent) => SetAllFans(Device(index), (uint)Math.Clamp(percent, 0, 100));
+        public void RestoreAuto(int index) => FanRunner.RestoreAuto(Device(index));
+    }
+
+    public static string Uuid(int index) => FanApi.GetUuid(Device(index));
+
+    public static string Uuid(IntPtr gpu)
+    {
+        uint bus = NvApi.GetBusId(gpu);
+        var gpus = NvApi.EnumeratePhysicalGpus();
+        int index = Array.FindIndex(gpus, g => g == gpu);
+        if (index < 0) throw new CliError($"PCI 总线 {bus} 的显卡已断开。");
+        return Uuid(index);
+    }
+
+    public static FanState.FanSettings? LoadSaved(int index)
+    {
+        var saved = FanState.Load(index);
+        if (saved is not null) GpuBinding.Require(saved.GpuUuid, Uuid(index));
+        return saved;
+    }
     public static bool TryDevice(int nvapiIndex, out IntPtr device)
     {
         lock (Gate)
@@ -100,6 +94,19 @@ internal static class FanRunner
 
     public static uint FanPercent(IntPtr device, uint fan) => FanApi.GetFanPercent(device, fan);
 
+    public static IReadOnlyList<FanTelemetry> ReadFanTelemetry(IntPtr device)
+    {
+        var readings = new List<FanTelemetry>();
+        for (uint fan = 0; fan < FanCount(device); fan++)
+        {
+            uint? percent;
+            try { percent = FanApi.GetFanPercent(device, fan); } catch (CliError) { percent = null; }
+            readings.Add(new FanTelemetry(fan, percent, FanApi.GetTargetFanPercent(device, fan),
+                FanApi.GetFanRpm(device, fan), FanApi.TryGetFanPolicy(device, fan)));
+        }
+        return readings;
+    }
+
     public static uint PowerMilliwatts(IntPtr device) => FanApi.GetPowerMilliwatts(device);
 
     public static uint CoreMhz(IntPtr device) => FanApi.GetClockMhz(device, FanApi.ClockGraphics);
@@ -114,61 +121,35 @@ internal static class FanRunner
     public static void SetAllFans(IntPtr device, uint percent)
     {
         uint fans = FanApi.GetFanCount(device);
+        if (fans == 0) throw new CliError("此显卡没有可控制的风扇。");
+        int effective = FanTelemetry.EffectivePercent((int)percent, FanApi.GetFanRange(device));
+        var errors = new List<Exception>();
         for (uint f = 0; f < fans; f++)
         {
-            if (FanApi.GetFanPolicy(device, f) != PolicyManual)
+            // NVML's setter itself switches this fan to manual policy. Do not require a
+            // separate policy getter that older driver versions may not export.
+            try
             {
-                FanApi.SetFanPolicy(device, f, PolicyManual);
+                FanApi.SetFanPercent(device, f, (uint)effective);
+                // Verify the accepted target, never compare against a potentially lagging or
+                // differently normalized percentage telemetry value.
+                FanTelemetry.RequireAccepted(effective, FanApi.GetTargetFanPercent(device, f));
             }
-
-            FanApi.SetFanPercent(device, f, percent);
+            catch (Exception ex) { errors.Add(ex); }
         }
+        if (errors.Count > 0) throw new AggregateException("部分风扇转速写入失败。", errors);
     }
 
     public static void RestoreAuto(IntPtr device)
     {
         uint fans = FanApi.GetFanCount(device);
+        var errors = new List<Exception>();
         for (uint f = 0; f < fans; f++)
         {
-            FanApi.SetFanPolicy(device, f, PolicyAuto);
+            try { FanApi.RestoreDefaultFan(device, f); }
+            catch (Exception ex) { errors.Add(ex); }
         }
+        if (errors.Count > 0) throw new AggregateException("部分风扇无法恢复自动控制。", errors);
     }
 
-    /// <summary>
-    /// Applies every stored fan setting once. Returns whether any setting existed and whether any of
-    /// them is a temperature curve (which is what decides whether the caller has to keep polling).
-    /// </summary>
-    public static (bool AnySetting, bool AnyCurve) ApplyOnce()
-    {
-        bool anySetting = false;
-        bool anyCurve = false;
-
-        foreach (int index in FanState.StoredGpuIndexes())
-        {
-            if (!TryDevice(index, out IntPtr dev)) continue;
-
-            FanState.FanSettings? settings = FanState.Load(index);
-            if (settings is null) continue;
-
-            int target;
-            if (settings.ModeValue == FanState.Mode.Fixed)
-            {
-                target = settings.FixedPercent ?? 50;
-            }
-            else if (settings.ModeValue == FanState.Mode.Curve && settings.Curve is { } curve)
-            {
-                target = curve.FanPercentAt((int)FanApi.GetTemperatureC(dev));
-                anyCurve = true;
-            }
-            else
-            {
-                continue;
-            }
-
-            anySetting = true;
-            SetAllFans(dev, (uint)Math.Clamp(target, 0, 100));
-        }
-
-        return (anySetting, anyCurve);
-    }
 }

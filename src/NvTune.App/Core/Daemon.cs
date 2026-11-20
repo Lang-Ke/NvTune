@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace SimpleNvidiaUndervolt;
 
@@ -23,43 +23,69 @@ internal static class Daemon
     /// <summary>The per-anchor offsets each GPU held right after its last successful apply. Comparing
     /// against these is how the watchdog notices that sleep/resume or a driver restart silently
     /// dropped the tuning.</summary>
-    private static readonly Dictionary<int, int[]> AppliedDeltas = new();
+    private static readonly Dictionary<int, AppliedTuning> AppliedStates = new();
 
-    public static async Task<int> Run(CancellationToken token)
+    public static async Task<int> Run(CancellationToken token, bool recoverFans = false)
     {
-        using var single = new Mutex(initiallyOwned: true, DaemonControl.MutexName, out bool isFirst);
-        if (!isFirst)
+        using var single = HardwareControlLease.TryAcquire(Path.Combine(Persistence.DataDir(), "daemon-instance.lock"));
+        if (single is null)
         {
             Diag.Log("后台任务已在运行，本次启动退出。");
             return 0;
         }
 
+        using var stopEvent = new EventWaitHandle(false, EventResetMode.ManualReset, DaemonControl.StopEventName);
+        stopEvent.Reset();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var stopWait = ThreadPool.RegisterWaitForSingleObject(stopEvent, (_, _) =>
+        {
+            try { linked.Cancel(); } catch (ObjectDisposedException) { }
+        }, null, Timeout.Infinite, true);
+        token = linked.Token;
+        bool failed = false;
+        FileStream? hardwareOwner = null;
         DaemonControl.WritePid();
         Diag.Log("后台任务启动。");
 
         try
         {
+            // A standby daemon waits while the GUI owns the hardware. Windows releases the
+            // GUI's file lock even on a crash, so saved curves regain a controller in that case too.
+            while ((hardwareOwner = HardwareControlLease.TryAcquire()) is null)
+            {
+                if (token.IsCancellationRequested) return 0;
+                await Delay(500, token).ConfigureAwait(false);
+            }
+            if (token.IsCancellationRequested) return 0;
             if (!await WaitForNvApi(token).ConfigureAwait(false))
             {
                 Diag.Log("NVIDIA 驱动在等待时间内未就绪，后台任务退出。");
                 return 1;
             }
 
+            FanRunner.Initialize();
+            if (recoverFans)
+                FanRunner.CreateController().RestoreSaved(FanRunner.MappedIndexes(), FanRunner.LoadSaved);
             await ApplyUndervolts(token).ConfigureAwait(false);
             await RunResidentLoop(token).ConfigureAwait(false);
             return 0;
         }
         catch (Exception ex)
         {
+            failed = true;
             Diag.Log("后台任务失败: " + ex);
             return 1;
         }
         finally
         {
+            stopWait.Unregister(null);
+            if (hardwareOwner is not null && (failed || token.IsCancellationRequested))
+                FanRunner.CreateController().Tick(FanRunner.MappedIndexes(), _ => null);
             try { NvApi.Unload(); } catch { }
             try { FanApi.Shutdown(); } catch { }
             DaemonControl.ClearPid();
             Diag.Log("后台任务结束。");
+            hardwareOwner?.Dispose();
         }
     }
 
@@ -118,6 +144,7 @@ internal static class Daemon
 
         foreach (int index in stored)
         {
+            if (token.IsCancellationRequested) return;
             if (index >= gpus.Length)
             {
                 Diag.Log($"已保存的 GPU {index} 不存在，跳过。");
@@ -153,12 +180,17 @@ internal static class Daemon
     private static bool IsTransientRead(Exception ex)
         => ex.Message.Contains(GpuTuning.TransientReadMarker, StringComparison.Ordinal);
 
+    internal static void RestoreSaved(int index) => ApplyOne(NvApi.EnumeratePhysicalGpus(), index);
+
+    internal static void RememberApplied(int index, IntPtr gpu) => AppliedStates[index] = AppliedTuning.Read(gpu);
+
     private static void ApplyOne(IntPtr[] gpus, int index)
     {
         IntPtr gpu = gpus[index];
         TuningDoc doc = PersistedTuning.Load(index);
         TuningDocuments.RequireMatchesGpu(doc.GpuName, doc.GpuPciIds, gpu,
             $"GPU {index} 的已保存降压");
+        GpuBinding.Require(doc.GpuUuid, FanRunner.Uuid(index));
 
         // The anchor voltages are power-state independent, so the live curve is usable at idle;
         // only a genuinely unrecognised table (a different layout) is refused.
@@ -171,7 +203,7 @@ internal static class Daemon
 
         var reference = ReferenceCurve.Match(new SelectedGpu(gpu, index, gpus.Length));
         GpuTuning.ApplyExact(gpu, doc, reference.Curve, live, $"GPU {index} 的已保存降压");
-        AppliedDeltas[index] = NvApi.GetCurveFreqDeltasKhz(gpu, NvApi.MaxCurveAnchors);
+        AppliedStates[index] = AppliedTuning.Read(gpu);
         Diag.Log($"GPU {index} 降压已重新应用。");
     }
 
@@ -180,18 +212,18 @@ internal static class Daemon
     /// restart both reset the V/F offsets, which is exactly the "it didn't survive" complaint a
     /// logon-only apply produces. Returns whether any stored undervolt is still worth watching.
     /// </summary>
-    private static bool WatchUndervolts()
+    internal static bool WatchUndervolts(ISet<int>? excluded = null)
     {
         IReadOnlyList<int> stored = PersistedTuning.StoredGpuIndexes();
         if (stored.Count == 0)
         {
-            AppliedDeltas.Clear();
+            AppliedStates.Clear();
             return false;
         }
 
-        foreach (int gone in AppliedDeltas.Keys.Where(i => !stored.Contains(i)).ToArray())
+        foreach (int gone in AppliedStates.Keys.Where(i => !stored.Contains(i)).ToArray())
         {
-            AppliedDeltas.Remove(gone);
+            AppliedStates.Remove(gone);
         }
 
         IntPtr[] gpus;
@@ -207,15 +239,18 @@ internal static class Daemon
 
         foreach (int index in stored)
         {
-            if (index >= gpus.Length)
+            if (index >= gpus.Length || excluded?.Contains(index) == true)
             {
                 continue;
             }
 
             try
             {
-                int[] live = NvApi.GetCurveFreqDeltasKhz(gpus[index], NvApi.MaxCurveAnchors);
-                if (AppliedDeltas.TryGetValue(index, out int[]? expected) && SameDeltas(expected, live))
+                GpuBinding.Require(PersistedTuning.Load(index).GpuUuid, FanRunner.Uuid(index));
+                var live = AppliedTuning.Read(gpus[index]);
+                if (AppliedStates.TryGetValue(index, out var expected)
+                    && SameDeltas(expected.CurveDeltasKhz, live.CurveDeltasKhz)
+                    && Math.Abs((long)expected.MemoryDeltaKhz - live.MemoryDeltaKhz) <= 1000)
                 {
                     continue;
                 }
@@ -258,84 +293,41 @@ internal static class Daemon
     /// </summary>
     private static async Task RunResidentLoop(CancellationToken token)
     {
-        bool hasUndervolt = PersistedTuning.StoredGpuIndexes().Count > 0;
-        bool hasFan = FanState.StoredGpuIndexes().Count > 0;
-        if (!hasUndervolt && !hasFan)
-        {
-            Diag.Log("没有需要常驻的设置，后台任务退出。");
-            return;
-        }
-
-        bool fanReady = false;
-        if (hasFan)
-        {
-            try
-            {
-                FanRunner.Initialize(NvApi.EnumeratePhysicalGpus().Length);
-                fanReady = true;
-            }
-            catch (Exception ex)
-            {
-                Diag.Log("NVML 初始化失败，风扇设置未应用: " + ex.Message);
-            }
-        }
-
-        int failures = 0;
+        var controller = FanRunner.CreateController();
         var undervoltClock = Stopwatch.StartNew();
         while (!token.IsCancellationRequested)
         {
-            bool anyCurve = false;
-            if (fanReady)
+            var fanIndexes = FanState.StoredGpuIndexes();
+            bool fansOk = true;
+            if (fanIndexes.Count > 0)
             {
                 try
                 {
-                    (bool anySetting, bool curve) = FanRunner.ApplyOnce();
-                    anyCurve = curve;
-                    failures = 0;
-                    if (!anySetting)
-                    {
-                        Diag.Log("风扇设置已清空，停止风扇调节。");
-                        fanReady = false;
-                    }
-                    else if (!curve)
-                    {
-                        // A fixed percentage holds on its own; only a temperature curve needs
-                        // someone watching the sensor.
-                        Diag.Log("仅固定转速，已应用，停止风扇调节。");
-                        fanReady = false;
-                    }
+                    FanRunner.Initialize();
+                    fansOk = controller.Tick(fanIndexes, FanRunner.LoadSaved);
                 }
                 catch (Exception ex)
                 {
-                    failures++;
-                    Diag.Log($"风扇设置应用失败 ({failures}): {ex.Message}");
-                    if (failures >= 6)
-                    {
-                        Diag.Log("风扇设置连续失败，停止风扇调节。");
-                        fanReady = false;
-                        failures = 0;
-                    }
+                    fansOk = false;
+                    Diag.Log("风扇初始化失败，将重试: " + ex.Message);
+                    controller.Tick(FanRunner.MappedIndexes(), _ => null);
                 }
             }
-
+            bool hasUndervolt = PersistedTuning.StoredGpuIndexes().Count > 0;
             if (hasUndervolt && undervoltClock.ElapsedMilliseconds >= UndervoltCheckMs)
             {
                 undervoltClock.Restart();
-                hasUndervolt = WatchUndervolts();
+                WatchUndervolts();
             }
-
-            // A fixed speed has nothing to follow, so with no curve and no undervolt left to
-            // watch there is no reason to stay resident.
-            if (!fanReady && !hasUndervolt)
+            bool anyCurve = fanIndexes.Any(i =>
             {
-                Diag.Log("已无可常驻的设置，后台任务退出。");
-                return;
-            }
-
-            await Delay(anyCurve ? FanPollMs : IdleTickMs, token).ConfigureAwait(false);
+                try { return FanState.Load(i)?.ModeValue == FanState.Mode.Curve; }
+                catch { return true; } // Invalid data must not silently disable recovery/retry.
+            });
+            if (!hasUndervolt && !anyCurve && fansOk) return;
+            await Delay(anyCurve || !fansOk ? FanPollMs : IdleTickMs, token).ConfigureAwait(false);
         }
     }
-
     private static async Task Delay(int ms, CancellationToken token)
     {
         try { await Task.Delay(ms, token).ConfigureAwait(false); }

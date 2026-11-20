@@ -79,6 +79,7 @@ internal sealed class ReferenceCurveDoc
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed class TuningDoc
 {
+    public string? GpuUuid { get; set; }
     public string? Type { get; set; }
     public int FormatVersion { get; set; }
     public string? AppVersion { get; set; }
@@ -176,6 +177,7 @@ internal sealed partial class DocJsonContext : JsonSerializerContext;
 /// </summary>
 internal static class TuningDocuments
 {
+    private static readonly object FileWriteGate = new();
     public const string ReferenceCurveType = "referenceCurve";
     public const string TuningType = "tuning";
     private const int Version = 1;
@@ -362,6 +364,14 @@ internal static class TuningDocuments
     /// one-line log message. The environment refusing the write is the anticipated failure it is.</summary>
     public static string WriteFile(string path, string json, string what)
     {
+        // Windows replacement can race with another replacement even with distinct temp files.
+        // HardwareControlLease excludes other writers; serialize saves inside this process too.
+        lock (FileWriteGate) return WriteFileCore(path, json, what);
+    }
+
+    private static string WriteFileCore(string path, string json, string what)
+    {
+        string temp = path + $".{Guid.NewGuid():N}.tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -369,7 +379,6 @@ internal static class TuningDocuments
             // Write-then-move, so an interrupted save can't leave a torn document at the final
             // path: the store files are consumed by the elevated logon re-apply, which must find
             // either the previous document or the new one, never half of one.
-            string temp = path + ".tmp";
             File.WriteAllText(temp, json + Environment.NewLine);
             File.Move(temp, path, overwrite: true);
             return $"Exported {what} to {path}.";
@@ -378,6 +387,10 @@ internal static class TuningDocuments
                                        or System.Security.SecurityException)
         {
             throw new CliError($"Writing {path} failed: {ex.Message}");
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch { }
         }
     }
 

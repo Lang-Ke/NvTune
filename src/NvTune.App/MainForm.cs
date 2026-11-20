@@ -2,18 +2,11 @@ using System.Diagnostics;
 
 namespace SimpleNvidiaUndervolt;
 
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     private static int D(int px) => Theme.Scaled(px);
 
-    private readonly ComboBox _gpuSelector = Theme.Combo(340);
-    private readonly Label _gpuInfo = new()
-    {
-        AutoSize = true,
-        ForeColor = Theme.Muted,
-        Font = Theme.SmallFont(),
-        Margin = new Padding(D(2), D(3), 0, 0),
-    };
+    private readonly DarkCombo _gpuSelector = Theme.Combo(340);
     private readonly Label _taskBadge = new()
     {
         // A fixed 36px box matches the theme button beside it, so both share one centre line
@@ -32,7 +25,7 @@ internal sealed class MainForm : Form
     private readonly DarkNumeric _mhzInput = Theme.Numeric(200, 4200, 1800);
     private readonly DarkNumeric _memInput = Theme.Numeric(-2000, 2000, 0);
 
-    private readonly ComboBox _fanMode = Theme.Combo(140);
+    private readonly DarkCombo _fanMode = Theme.Combo(140);
     private readonly DarkNumeric _fanFixed = Theme.Numeric(0, 100, 50, 78);
     private readonly FanCurveEditor _curveEditor = new() { Dock = DockStyle.Fill };
     private readonly Label _daemonLabel = new()
@@ -54,10 +47,17 @@ internal sealed class MainForm : Form
     };
     private readonly System.Windows.Forms.Timer _pollTimer = new() { Interval = 1500 };
     private readonly System.Windows.Forms.Timer _fanTimer = new() { Interval = 4000 };
+    private readonly FanController _fanController = FanRunner.CreateController();
+    private readonly Stopwatch _undervoltClock = Stopwatch.StartNew();
+    private FileStream? _controlLease;
+    private FileStream? _guiLease;
 
     private IntPtr[] _gpus = Array.Empty<IntPtr>();
+    private readonly Dictionary<int, string> _gpuUuids = new();
     private IReadOnlyList<(int Mv, int Mhz)> _anchors = Array.Empty<(int, int)>();
     private bool _loading;
+    private readonly bool _preview;
+    private string? _fanSummary;
 
     /// <summary>Undervolt edits are tracked per GPU, with the edited values kept per card too:
     /// switching cards must neither carry a pending edit onto the other card's saved file nor
@@ -70,223 +70,44 @@ internal sealed class MainForm : Form
     private readonly HashSet<int> _tempFanCleared = new();
     private sealed record UndervoltDraft(int Mv, int Mhz, int MemMhz);
 
-    public MainForm(string[] args)
+    public MainForm(string[] args, bool preview = false)
     {
-        Text = "NvTune · NVIDIA 降压与风扇";
+        _preview = preview;
+        SuspendLayout();
+        Text = "NvTune 1.0.6 · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
-        // Every fixed pixel value in this form goes through Theme.Scaled(). Letting WinForms also
-        // apply its own DPI autoscale would multiply the two factors and blow the layout apart on
-        // a 175% display, so the scaling has exactly one owner.
-        AutoScaleMode = AutoScaleMode.None;
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
         DoubleBuffered = true;
         ResizeRedraw = true;
-        // On a small screen at 250% the design layout cannot fit, so the window scrolls instead of
-        // squeezing the cards until their rows overlap.
-        AutoScroll = true;
-        MinimumSize = new Size(D(880), D(600));
-        Size = new Size(D(1140), D(900));
+        ClientSize = new Size(D(960), D(760));
+        MinimumSize = new Size(D(640), D(480));
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
-
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(D(18), D(14), D(18), 0),
-            ColumnCount = 1,
-            RowCount = 4,
-            BackColor = Theme.Canvas,
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(100)));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(132)));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, D(64)));
-        // The floor keeps every card at its design height; without it a short window shrinks the
-        // percent row below the fan card's minimum and the heading paints over the plot.
-        root.MinimumSize = new Size(D(880) - D(36), D(14) + D(100) + D(132) + D(360) + D(64));
-        root.Controls.Add(BuildHeader(), 0, 0);
-        root.Controls.Add(BuildUndervoltCard(), 0, 1);
-        root.Controls.Add(BuildFanCard(), 0, 2);
-        root.Controls.Add(BuildFooter(), 0, 3);
-        Controls.Add(root);
-        Controls.Add(_statusLabel);
-
-        _statusLabel.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.Border);
-            e.Graphics.DrawLine(pen, 0, 0, _statusLabel.Width, 0);
-        };
-
+        BuildLayout();
         _fanMode.Items.AddRange(new object[] { "自动", "固定转速", "温度曲线" });
         _pollTimer.Tick += (_, _) => UpdateLiveStatus();
+        _fanTimer.Tick += (_, _) => ApplyTemporaryFanCurve();
         _curveEditor.PointsChanged += (_, _) => MarkFanDirty();
         _fanMode.SelectedIndexChanged += (_, _) => OnFanModeChanged();
         _mvInput.ValueChanged += (_, _) => OnVoltageEdited();
         _mhzInput.ValueChanged += (_, _) => MarkUndervoltDirty();
         _memInput.ValueChanged += (_, _) => MarkUndervoltDirty();
-        Load += (_, _) =>
+        if (!preview)
         {
-            SetStatus("正在初始化显卡接口…", Theme.Muted);
-            _ = InitializeGpusAsync();
-        };
+            Load += (_, _) =>
+            {
+                FitToWorkingArea();
+                SetStatus("正在初始化显卡接口…", Theme.Muted);
+                _ = InitializeGpusAsync();
+            };
+        }
         Shown += (_, _) => ForcePaint();
+        ResumeLayout(true);
+        if (preview) PopulatePreview();
     }
-
-    private Control BuildHeader()
-    {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            Height = D(92),
-            BackColor = Theme.Canvas,
-            ColumnCount = 3,
-            RowCount = 1,
-            Padding = new Padding(D(4), D(4), D(4), D(8)),
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var brand = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, D(26), 0) };
-        brand.Controls.Add(new Label
-        {
-            Text = "NvTune",
-            Font = Theme.TitleFont(19f),
-            ForeColor = Theme.Text,
-            AutoSize = true,
-            Margin = new Padding(0, D(2), 0, 0),
-        });
-        brand.Controls.Add(new Label
-        {
-            Text = "NVIDIA 显卡降压 · 多点风扇曲线",
-            Font = Theme.SmallFont(),
-            ForeColor = Theme.Muted,
-            AutoSize = true,
-            Margin = new Padding(D(1), D(1), 0, 0),
-        });
-
-        _gpuSelector.SelectedIndexChanged += (_, _) => OnGpuChanged();
-        var gpuStack = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown,
-            AutoSize = true,
-            WrapContents = false,
-            Margin = new Padding(0, D(8), 0, 0),
-        };
-        gpuStack.Controls.Add(Theme.Caption("选择显卡"));
-        gpuStack.Controls.Add(_gpuSelector);
-        gpuStack.Controls.Add(_gpuInfo);
-
-        _taskBadge.Margin = new Padding(0, 0, D(4), 0);
-        panel.Controls.Add(brand, 0, 0);
-        panel.Controls.Add(gpuStack, 1, 0);
-        panel.Controls.Add(_taskBadge, 2, 0);
-        return panel;
-    }
-
-    private Control BuildUndervoltCard()
-    {
-        var card = Theme.Card("核心降压", out var cardBody);
-        // A two-row grid keeps every caption on one baseline and every input and button on the
-        // next, so nothing drifts when a caption wraps or a control changes height.
-        var grid = Theme.Table(5, 2);
-        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(40)));
-        AddField(grid, 0, "电压上限 (mV)", _mvInput);
-        AddField(grid, 1, "该电压目标频率 (MHz)", _mhzInput);
-        AddField(grid, 2, "显存偏移 (MHz)", _memInput);
-
-        var applyUndervolt = Theme.PrimaryButton("本次应用", (_, _) => ApplyUndervolt());
-        new ToolTip().SetToolTip(applyUndervolt, "仅本次运行临时应用降压，关闭软件后恢复已保存配置");
-        grid.Controls.Add(Theme.Cell(applyUndervolt, new Padding(D(18), 0, 0, 0)), 3, 1);
-        grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()),
-            new Padding(D(10), 0, 0, 0)), 4, 1);
-
-        cardBody.Controls.Add(grid);
-        return card;
-    }
-
-    private Control BuildFanCard()
-    {
-        var card = Theme.Card("风扇控制", out var fanBody);
-        var top = Theme.Table(9, 1);
-        top.Dock = DockStyle.Top;
-        top.Height = D(56);
-        top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-        top.Controls.Add(Theme.CellLabel("模式", new Padding(0, 0, D(8), 0)), 0, 0);
-        top.Controls.Add(Theme.Cell(_fanMode, new Padding(0, 0, D(20), 0)), 1, 0);
-        top.Controls.Add(Theme.CellLabel("固定转速", new Padding(0, 0, D(8), 0)), 2, 0);
-        top.Controls.Add(Theme.Cell(_fanFixed, new Padding(0, 0, D(4), 0)), 3, 0);
-        top.Controls.Add(Theme.CellLabel("%", new Padding(0, 0, D(20), 0)), 4, 0);
-
-        var applyFan = Theme.PrimaryButton("本次应用", (_, _) => ApplyFanSettings());
-        new ToolTip().SetToolTip(applyFan, "仅本次运行临时应用风扇设置，关闭软件后恢复已保存配置");
-        // The left margin matches the undervolt row's button offset, so the two "本次应用"
-        // buttons stack on one vertical line instead of drifting by a few pixels.
-        top.Controls.Add(Theme.Cell(applyFan, new Padding(D(10), 0, D(10), 0)), 5, 0);
-        top.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => RestoreFanAuto()),
-            new Padding(0, 0, D(22), 0)), 6, 0);
-        top.Controls.Add(Theme.CellLabel("推荐曲线", new Padding(0, 0, D(8), 0)), 7, 0);
-        top.Controls.Add(Theme.Cell(Theme.SecondaryButton("载入", (_, _) => _curveEditor.ResetToDefault(), 78),
-            new Padding(0)), 8, 0);
-
-        var editorHost = new BufferedPanel
-        {
-            Dock = DockStyle.Fill,
-            Padding = new Padding(0, D(2), 0, 0),
-            BackColor = Theme.Surface,
-        };
-        editorHost.Controls.Add(_curveEditor);
-
-        var bottom = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Bottom,
-            Height = D(40),
-            FlowDirection = FlowDirection.LeftToRight,
-            Padding = new Padding(D(2), D(8), 0, 0),
-            BackColor = Theme.Surface,
-        };
-        bottom.Controls.Add(_daemonLabel);
-        // Dock order matters: the fill area must be added first so the top strip and the
-        // status line dock before it, instead of the status line overlapping the plot.
-        fanBody.Controls.Add(editorHost);
-        fanBody.Controls.Add(bottom);
-        fanBody.Controls.Add(top);
-        return card;
-    }
-
-    private Control BuildFooter()
-    {
-        var flow = Theme.Table(4, 1);
-        flow.Height = D(60);
-        flow.Padding = new Padding(D(4), D(8), 0, D(8));
-        flow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var save = Theme.PrimaryButton("写入配置", (_, _) => SaveAllSettings(), 132);
-        var tip = new ToolTip();
-        tip.SetToolTip(save, "把当前降压参数与风扇设置写入配置文件，重启后自动生效");
-        flow.Controls.Add(Theme.Cell(save, new Padding(0, 0, D(6), 0)), 0, 0);
-        flow.Controls.Add(Theme.CellLabel("重启生效", new Padding(0, 0, D(18), 0)), 1, 0);
-        flow.Controls.Add(Theme.Cell(Theme.SecondaryButton("全部恢复出厂", (_, _) => ClearEverything(), 132),
-            new Padding(0, 0, D(8), 0)), 2, 0);
-        flow.Controls.Add(Theme.Cell(Theme.SecondaryButton("打开数据目录", (_, _) =>
-        {
-            try { Process.Start(new ProcessStartInfo(Persistence.DataDir()) { UseShellExecute = true }); }
-            catch (Exception ex) { SetStatus("打开目录失败: " + ex.Message, Theme.Danger); }
-        }, 132), new Padding(0)), 3, 0);
-        return flow;
-    }
-
-    private static void AddField(TableLayoutPanel grid, int column, string caption, Control input)
-    {
-        Label label = Theme.Caption(caption);
-        label.Anchor = AnchorStyles.Left;
-        label.Margin = new Padding(0, 0, D(18), D(4));
-        grid.Controls.Add(label, column, 0);
-        grid.Controls.Add(Theme.Cell(input, new Padding(0, 0, D(18), 0)), column, 1);
-    }
-
     private async Task InitializeGpusAsync()
     {
         try
@@ -294,7 +115,7 @@ internal sealed class MainForm : Form
             await Task.Run(() =>
             {
                 NvApi.Initialize();
-                FanRunner.Initialize(NvApi.EnumeratePhysicalGpus().Length);
+                FanRunner.Initialize();
                 _gpus = NvApi.EnumeratePhysicalGpus();
             });
             if (_gpus.Length == 0)
@@ -303,18 +124,40 @@ internal sealed class MainForm : Form
                 return;
             }
 
+            if (IsDisposed || Disposing) return;
+            _guiLease = HardwareControlLease.TryAcquire(Path.Combine(Persistence.DataDir(), "gui-instance.lock"))
+                ?? throw new CliError("已有 NvTune 窗口正在运行。");
+            DaemonControl.Stop();
+            _controlLease = HardwareControlLease.TryAcquire()
+                ?? throw new CliError("另一个 NvTune 窗口或后台正在控制显卡，请关闭后重试。");
+            DaemonControl.Start(recoverFans: true);
+            _fanTimer.Start();
+
             _loading = true;
-            foreach (IntPtr gpu in _gpus) _gpuSelector.Items.Add(NvApi.SafeFullName(gpu));
+            for (int i = 0; i < _gpus.Length; i++)
+            {
+                _gpuSelector.Items.Add(NvApi.SafeFullName(_gpus[i]));
+                try { _gpuUuids[i] = FanRunner.Uuid(i); }
+                catch (Exception ex) { Diag.Log($"GPU {i} 无法绑定当前会话: {ex.Message}"); }
+            }
             _gpuSelector.SelectedIndex = 0;
             _loading = false;
             await Task.Run(() => _anchors = NvApi.GetVfCurve(SelectedGpuHandle));
             OnGpuChanged();
             _pollTimer.Start();
-            SetStatus("就绪。「写入配置」重启后仍然生效；两处「本次应用」仅在本次运行期间生效。", Theme.Success);
+            SetStatus("就绪。「保存并开机应用」重启后仍然生效；两处「本次应用」仅在本次运行期间生效。", Theme.Success);
+            ApplyTemporaryFanCurve();
             UpdateTaskBadge();
+            Diag.Log($"界面初始化完成，检测到 {_gpus.Length} 张 NVIDIA 显卡。");
         }
         catch (Exception ex)
         {
+            _fanTimer.Stop();
+            _controlLease?.Dispose();
+            _controlLease = null;
+            _guiLease?.Dispose();
+            _guiLease = null;
+            _gpus = Array.Empty<IntPtr>();
             SetStatus("初始化失败: " + ex.Message, Theme.Danger);
             Diag.Log("初始化失败: " + ex);
         }
@@ -328,96 +171,23 @@ internal sealed class MainForm : Form
         Refresh();
     }
 
-    /// <summary>A move to a monitor with a different scale must re-derive every fixed pixel value,
-    /// so the cached DPI ratio is dropped before the new layout pass runs.</summary>
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
-        float previous = Theme.DpiScale;
-        Theme.ResetDpiCache(e.DeviceDpiNew);
-        float current = Theme.DpiScale;
-        if (previous > 0 && Math.Abs(current - previous) > 0.01f)
-        {
-            float ratio = current / previous;
-            MinimumSize = new Size(
-                Math.Max(1, (int)Math.Round(MinimumSize.Width * ratio)),
-                Math.Max(1, (int)Math.Round(MinimumSize.Height * ratio)));
-            RescaleForDpi(this, current / previous);
-        }
-        base.OnDpiChanged(e);
+        base.OnDpiChanged(e); // WinForms scales the tree exactly once, including point fonts.
+        FitToWorkingArea();
+        UpdateContentWidth();
+        Invalidate(true);
     }
-
-    /// <summary>The form opts out of WinForms autoscaling so the theme owns every pixel value, which
-    /// means a monitor change has to rescale the tree by hand. Ratios are applied to sizes,
-    /// margins and padding; fonts are in points and already follow the new DPI.</summary>
-    private static void RescaleForDpi(Control parent, float ratio)
-    {
-        foreach (Control child in parent.Controls)
-        {
-            if (child.Dock == DockStyle.Fill || child.Dock == DockStyle.Bottom || child.Dock == DockStyle.Top
-                || child.Dock == DockStyle.Left || child.Dock == DockStyle.Right)
-            {
-                // A docked control takes its extent from the parent, but its fixed side and
-                // padding still carry design pixels.
-                if (child.Dock is DockStyle.Top or DockStyle.Bottom)
-                {
-                    child.Height = Math.Max(1, (int)Math.Round(child.Height * ratio));
-                }
-                else if (child.Dock is DockStyle.Left or DockStyle.Right)
-                {
-                    child.Width = Math.Max(1, (int)Math.Round(child.Width * ratio));
-                }
-            }
-            else
-            {
-                child.Width = Math.Max(1, (int)Math.Round(child.Width * ratio));
-                child.Height = Math.Max(1, (int)Math.Round(child.Height * ratio));
-            }
-
-            child.Margin = ScalePadding(child.Margin, ratio);
-            child.Padding = ScalePadding(child.Padding, ratio);
-            if (child.MinimumSize.Width > 0 || child.MinimumSize.Height > 0)
-            {
-                child.MinimumSize = new Size(
-                    Math.Max(0, (int)Math.Round(child.MinimumSize.Width * ratio)),
-                    Math.Max(0, (int)Math.Round(child.MinimumSize.Height * ratio)));
-            }
-
-            if (child is TableLayoutPanel table)
-            {
-                foreach (RowStyle row in table.RowStyles)
-                {
-                    if (row.SizeType == SizeType.Absolute) row.Height = Math.Max(1, row.Height * ratio);
-                }
-                foreach (ColumnStyle column in table.ColumnStyles)
-                {
-                    if (column.SizeType == SizeType.Absolute) column.Width = Math.Max(1, column.Width * ratio);
-                }
-            }
-
-            RescaleForDpi(child, ratio);
-        }
-    }
-
-    private static Padding ScalePadding(Padding padding, float ratio) => new(
-        (int)Math.Round(padding.Left * ratio), (int)Math.Round(padding.Top * ratio),
-        (int)Math.Round(padding.Right * ratio), (int)Math.Round(padding.Bottom * ratio));
-
-    /// <summary>WS_EX_COMPOSITED makes Windows compose the whole window off-screen before it is
-    /// blitted. Without it, dragging or resizing leaves half-painted cards and plot fragments
-    /// behind, because the custom-painted children repaint at different moments.</summary>
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            CreateParams cp = base.CreateParams;
-            cp.ExStyle |= 0x02000000;
-            return cp;
-        }
-    }
-
     private int SelectedIndex => Math.Max(0, _gpuSelector.SelectedIndex);
     private IntPtr SelectedGpuHandle => _gpus.Length > SelectedIndex ? _gpus[SelectedIndex] : IntPtr.Zero;
     private bool UndervoltDirty => _dirtyUndervoltGpus.Contains(SelectedIndex);
+
+    private void RequireSelectedGpuIdentity()
+    {
+        string? expected = _gpuUuids.GetValueOrDefault(SelectedIndex);
+        GpuBinding.Require(expected, FanRunner.Uuid(SelectedIndex));
+        GpuBinding.Require(expected, FanRunner.Uuid(SelectedGpuHandle));
+    }
 
     private void OnGpuChanged()
     {
@@ -443,7 +213,7 @@ internal sealed class MainForm : Form
     private void ConfigureVoltageRange()
     {
         int lowest = _anchors[0].Mv, highest = _anchors[^1].Mv;
-        bool hasDraft = _undervoltDrafts.TryGetValue(SelectedIndex, out UndervoltDraft? draft);
+        _undervoltDrafts.TryGetValue(SelectedIndex, out UndervoltDraft? draft);
         bool hasSavedTuning = PersistedTuning.StoredGpuIndexes().Contains(SelectedIndex);
         if (draft is null && hasSavedTuning && UndervoltUiState.Load(SelectedIndex) is { } saved)
         {
@@ -469,7 +239,7 @@ internal sealed class MainForm : Form
         }
 
         _loading = false;
-        if (!hasDraft)
+        if (draft is null)
         {
             SyncClockToVoltage();
         }
@@ -542,20 +312,22 @@ internal sealed class MainForm : Form
         _dirtyUndervoltGpus.Add(SelectedIndex);
         _undervoltDrafts[SelectedIndex] = new UndervoltDraft(
             (int)_mvInput.Value, (int)_mhzInput.Value, (int)_memInput.Value);
-        SetStatus("降压参数已修改。点「本次应用」仅本次运行生效，点「写入配置」重启后仍生效。", Theme.Warning);
+        SetStatus("降压参数已修改。点「本次应用」仅本次运行生效，点「保存并开机应用」重启后仍生效。", Theme.Warning);
     }
 
     private void ApplyUndervolt()
     {
         IntPtr gpu = SelectedGpuHandle;
-        if (gpu == IntPtr.Zero) return;
+        if (gpu == IntPtr.Zero || _controlLease is null) return;
         try
         {
-            DaemonControl.Stop();
+            RequireSelectedGpuIdentity();
+            _tempUndervoltGpus.Add(SelectedIndex);
+            _tempUndervoltCleared.Remove(SelectedIndex);
             var stock = GpuTuning.ResetAndReadStock(gpu);
             int mv = (int)_mvInput.Value, mhz = (int)_mhzInput.Value, memDelta = (int)_memInput.Value * 1000;
             var plan = GpuTuning.BuildCurvePlan(stock, mv, mhz, TuneRequest.DefaultCapPoints);
-            GpuTuning.Apply(gpu, plan, stock, mhz, memDelta);
+            foreach (string line in GpuTuning.Apply(gpu, plan, stock, mhz, memDelta)) Diag.Log(line);
             _dirtyUndervoltGpus.Remove(SelectedIndex);
             _tempUndervoltCleared.Remove(SelectedIndex);
             _tempUndervoltGpus.Add(SelectedIndex);
@@ -574,92 +346,63 @@ internal sealed class MainForm : Form
         UpdateLiveStatus();
     }
 
-    /// <summary>Saves the current panel state without touching the GPU when it can: the undervolt
-    /// plan is recomputed from a read-only stock recovery, and only a recovery the driver distorts
-    /// falls back to a real reset. The background task then applies what was saved.</summary>
+    /// <summary>Verify the selected GPU's settings before persisting them. The GUI owns the
+    /// controller while open; closing the window hands the saved settings back to the daemon.</summary>
     private void SaveAllSettings()
     {
         IntPtr gpu = SelectedGpuHandle;
-        if (gpu == IntPtr.Zero)
-        {
-            SetStatus("没有可保存的显卡。", Theme.Warning);
-            return;
-        }
-
+        if (gpu == IntPtr.Zero || _controlLease is null) return;
         try
         {
+            RequireSelectedGpuIdentity();
+            DaemonControl.Stop(); // Stop the standby copy before updating installed program files.
             Persistence.EnsureInstalled();
-            bool savedUndervolt = false;
             if (_tempUndervoltCleared.Contains(SelectedIndex))
             {
                 PersistedTuning.Remove(SelectedIndex);
                 UndervoltUiState.Delete(SelectedIndex);
                 _dirtyUndervoltGpus.Remove(SelectedIndex);
                 _tempUndervoltCleared.Remove(SelectedIndex);
-                savedUndervolt = true;
             }
-            else if (UndervoltDirty || _tempUndervoltGpus.Contains(SelectedIndex))
+            else if (UndervoltDirty || _tempUndervoltGpus.Contains(SelectedIndex)
+                || (PersistedTuning.StoredGpuIndexes().Contains(SelectedIndex)
+                    && PersistedTuning.Load(SelectedIndex).GpuUuid is null))
             {
-                var stock = ReadStockForSave(gpu);
+                // Track before the first reset so even a partial/failed save can restore on close.
+                _tempUndervoltGpus.Add(SelectedIndex);
+                string uuid = FanRunner.Uuid(SelectedIndex);
+                var stock = GpuTuning.ResetAndReadStock(gpu);
                 int mv = (int)_mvInput.Value, mhz = (int)_mhzInput.Value, memDelta = (int)_memInput.Value * 1000;
                 var plan = GpuTuning.BuildCurvePlan(stock, mv, mhz, TuneRequest.DefaultCapPoints);
+                var diagnostics = GpuTuning.Apply(gpu, plan, stock, mhz, memDelta);
+                foreach (string line in diagnostics) Diag.Log(line);
                 var doc = TuningDocuments.MakeTuningDoc(GpuIdentity.Read(gpu), stock,
                     new AppliedTuning(plan.DeltasKhz, memDelta));
+                doc.GpuUuid = uuid;
                 PersistedTuning.Save(doc, SelectedIndex);
                 UndervoltUiState.Save(new UndervoltUiState.Values(mv, mhz, (int)_memInput.Value), SelectedIndex);
+                Daemon.RememberApplied(SelectedIndex, gpu);
                 _dirtyUndervoltGpus.Remove(SelectedIndex);
                 _tempUndervoltGpus.Remove(SelectedIndex);
-                savedUndervolt = true;
             }
 
             int mode = _fanMode.SelectedIndex;
-            if (mode == 1)
-            {
-                int percent = (int)_fanFixed.Value;
-                FanState.Save(new FanState.FanSettings(1, percent, null), SelectedIndex);
-                // A fixed speed has no curve to poll, so the daemon exits; write it now or the
-                // setting would only appear at the next logon.
-                if (FanRunner.TryDevice(SelectedIndex, out IntPtr fanDev) && FanRunner.FanCount(fanDev) > 0)
-                {
-                    FanRunner.SetAllFans(fanDev, (uint)Math.Clamp(percent, 0, 100));
-                }
-            }
-            else if (mode == 2)
-            {
-                FanState.Save(new FanState.FanSettings(2, null,
-                    _curveEditor.GetPoints().Select(p => new[] { p.TempC, p.Percent }).ToArray()), SelectedIndex);
-            }
-            else
-            {
-                FanState.Delete(SelectedIndex);
-                if (FanRunner.TryDevice(SelectedIndex, out IntPtr autoDev)) FanRunner.RestoreAuto(autoDev);
-            }
-
-            UndervoltUiState.Save(new UndervoltUiState.Values(
-                (int)_mvInput.Value, (int)_mhzInput.Value, (int)_memInput.Value), SelectedIndex);
-
-            _tempFanSettings.Remove(SelectedIndex);
+            var settings = new FanState.FanSettings(mode,
+                mode == 1 ? (int)_fanFixed.Value : null,
+                mode == 2 ? _curveEditor.GetPoints().Select(p => new[] { p.TempC, p.Percent }).ToArray() : null,
+                FanRunner.Uuid(SelectedIndex));
+            _tempFanSettings[SelectedIndex] = settings;
             _tempFanCleared.Remove(SelectedIndex);
-
+            _fanController.Apply(SelectedIndex, settings);
+            if (mode == 0) FanState.Delete(SelectedIndex);
+            else FanState.Save(settings, SelectedIndex);
+            _tempFanSettings.Remove(SelectedIndex);
             SyncSchedulerToSavedSettings();
-            // A newly saved undervolt should take effect now, not on the watchdog's next 20 s
-            // sweep: the daemon re-reads every stored document when it starts.
-            if (savedUndervolt) DaemonControl.Stop();
-            SyncDaemonToSavedSettings();
+            ApplyTemporaryFanCurve();
             UpdateTaskBadge();
             UpdateDaemonLabel();
-
-            bool hasAnything = HasSavedUndervolt() || HasSavedFanCurve()
-                || FanState.StoredGpuIndexes().Count > 0;
-            string pendingElsewhere = _dirtyUndervoltGpus.Count > 0
-                ? " 另有显卡的降压改动尚未保存，请切到该卡再保存。"
-                : string.Empty;
-            SetStatus((!hasAnything
-                ? "当前为自动风扇、无降压设置，没有需要保存的配置。"
-                : savedUndervolt
-                    ? "配置已写入，重启后自动生效。"
-                    : "风扇配置已写入，重启后自动生效；降压参数未修改，保留原降压配置。") + pendingElsewhere,
-                hasAnything ? Theme.Success : Theme.Muted);
+            string pending = _dirtyUndervoltGpus.Count > 0 ? " 其他显卡仍有未保存的降压改动。" : string.Empty;
+            SetStatus("配置已保存并应用，下次登录时自动应用。" + pending, Theme.Success);
         }
         catch (Exception ex)
         {
@@ -667,30 +410,20 @@ internal sealed class MainForm : Form
             Diag.Log("写入配置失败: " + ex);
             MessageBox.Show(this, ex.Message, "写入配置失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
-
+        finally
+        {
+            try { DaemonControl.Start(recoverFans: true); }
+            catch (Exception ex) { Diag.Log("启动待命后台失败: " + ex.Message); }
+        }
         UpdateLiveStatus();
     }
-
-    /// <summary>Read-only when the driver lets it be; a card already holding a tuning distorts the
-    /// recovered stock curve, and a reset there is safe because the saved plan is applied again
-    /// right afterwards.</summary>
-    private static IReadOnlyList<(int Mv, int Mhz)> ReadStockForSave(IntPtr gpu)
-    {
-        try
-        {
-            return GpuTuning.RecoverStockReadOnly(gpu);
-        }
-        catch (CliError)
-        {
-            return GpuTuning.ResetAndReadStock(gpu);
-        }
-    }
-
     private void ResetUndervolt()
     {
+        if (_controlLease is null || SelectedGpuHandle == IntPtr.Zero) return;
         try
         {
-            DaemonControl.Stop();
+            RequireSelectedGpuIdentity();
+            _tempUndervoltGpus.Add(SelectedIndex);
             GpuTuning.Clear(SelectedGpuHandle);
             _dirtyUndervoltGpus.Remove(SelectedIndex);
             _undervoltDrafts.Remove(SelectedIndex);
@@ -705,7 +438,11 @@ internal sealed class MainForm : Form
 
     private void LoadFanStateForGpu()
     {
-        var settings = FanState.Load(SelectedIndex);
+        FanState.FanSettings? settings;
+        try { settings = FanState.Load(SelectedIndex); }
+        catch (Exception ex) { settings = null; SetStatus(ex.Message, Theme.Warning); }
+        if (_tempFanSettings.TryGetValue(SelectedIndex, out var temporary)) settings = temporary;
+        if (_tempFanCleared.Contains(SelectedIndex)) settings = null;
         _loading = true;
         if (settings is null)
         {
@@ -734,30 +471,31 @@ internal sealed class MainForm : Form
     {
         if (!_loading && _fanMode.SelectedIndex == 2)
         {
-            SetStatus("曲线已修改。点「本次应用」仅本次运行生效，点「写入配置」重启后仍生效。", Theme.Warning);
+            SetStatus("曲线已修改。点「本次应用」仅本次运行生效，点「保存并开机应用」重启后仍生效。", Theme.Warning);
         }
     }
 
     private void ApplyFanSettings()
     {
+        if (_controlLease is null) return;
         int mode = _fanMode.SelectedIndex;
         if (mode == 0) { RestoreFanAuto(); return; }
 
         try
         {
+            RequireSelectedGpuIdentity();
             IntPtr dev = FanRunner.Device(SelectedIndex);
             if (FanRunner.FanCount(dev) == 0) { SetStatus("此显卡没有可通过软件控制的风扇。", Theme.Warning); return; }
 
             var settings = mode == 1
                 ? new FanState.FanSettings(mode, (int)_fanFixed.Value, null)
                 : new FanState.FanSettings(mode, null, _curveEditor.GetPoints().Select(p => new[] { p.TempC, p.Percent }).ToArray());
-            int target = mode == 1 ? settings.FixedPercent!.Value : settings.Curve!.FanPercentAt((int)FanRunner.TemperatureC(dev));
-            FanRunner.SetAllFans(dev, (uint)Math.Clamp(target, 0, 100));
-            DaemonControl.Stop();
+            settings = settings with { GpuUuid = FanRunner.Uuid(SelectedIndex) };
             _tempFanCleared.Remove(SelectedIndex);
             _tempFanSettings[SelectedIndex] = settings;
-            if (mode == 2) _fanTimer.Start();
-            SetStatus(mode == 2 ? "风扇曲线已临时应用，关闭软件后恢复已保存配置。" : $"风扇已临时固定 {target}%，关闭软件后恢复已保存配置。", Theme.Success);
+            _fanController.Apply(SelectedIndex, settings);
+            SetStatus(mode == 2 ? "风扇曲线已临时应用，请核对驱动目标与读数。" : $"已提交风扇设定 {settings.FixedPercent}%，请核对驱动目标与读数。", Theme.Success);
+            UpdateLiveStatus();
             UpdateTaskBadge();
             UpdateDaemonLabel();
         }
@@ -771,13 +509,13 @@ internal sealed class MainForm : Form
 
     private void RestoreFanAuto()
     {
+        if (_controlLease is null) return;
         try
         {
-            if (FanRunner.TryDevice(SelectedIndex, out IntPtr dev)) FanRunner.RestoreAuto(dev);
-            DaemonControl.Stop();
+            RequireSelectedGpuIdentity();
             _tempFanSettings.Remove(SelectedIndex);
             _tempFanCleared.Add(SelectedIndex);
-            _fanTimer.Stop();
+            _fanController.Apply(SelectedIndex, null);
             _loading = true;
             _fanMode.SelectedIndex = 0;
             _loading = false;
@@ -791,68 +529,91 @@ internal sealed class MainForm : Form
 
     private void ApplyTemporaryFanCurve()
     {
-        if (!_tempFanSettings.TryGetValue(SelectedIndex, out var settings)
-            || settings.ModeValue != FanState.Mode.Curve
-            || !FanRunner.TryDevice(SelectedIndex, out IntPtr dev))
-        {
-            return;
-        }
-
+        if (_controlLease is null) return;
         try
         {
-            int target = settings.Curve!.FanPercentAt((int)FanRunner.TemperatureC(dev));
-            FanRunner.SetAllFans(dev, (uint)Math.Clamp(target, 0, 100));
+            FanRunner.Initialize();
+            int[] indexes = FanState.StoredGpuIndexes().Concat(_tempFanSettings.Keys).Concat(_tempFanCleared).Distinct().ToArray();
+            bool ok = _fanController.Tick(indexes, index =>
+            {
+                if (_tempFanCleared.Contains(index)) return null;
+                if (_tempFanSettings.TryGetValue(index, out var temporary))
+                {
+                    GpuBinding.Require(temporary.GpuUuid, FanRunner.Uuid(index));
+                    return temporary;
+                }
+                return FanRunner.LoadSaved(index);
+            });
+            if (!ok) SetStatus("部分显卡风扇控制失败，已尝试恢复自动控制，将继续重试。详情见日志。", Theme.Warning);
+            if (_undervoltClock.ElapsedMilliseconds >= 20000)
+            {
+                _undervoltClock.Restart();
+                Daemon.WatchUndervolts(_tempUndervoltGpus.Concat(_tempUndervoltCleared).ToHashSet());
+            }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _fanController.Tick(FanRunner.MappedIndexes(), _ => null);
+            SetStatus("显卡接口暂不可用，将重试: " + ex.Message, Theme.Warning);
+            Diag.Log("界面控制循环失败: " + ex.Message);
+        }
     }
-
     private void ClearEverything()
     {
-        if (MessageBox.Show(this, "将清除所有降压与风扇设置，恢复显卡默认状态，并删除开机任务和后台进程。\n\n继续？",
+        if (_controlLease is null) return;
+        if (MessageBox.Show(this, "将清除所有降压与风扇设置，恢复显卡默认状态，并删除开机任务。\n\n继续？",
                 "全部恢复出厂", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-        try
+        _fanTimer.Stop();
+        _tempFanSettings.Clear();
+        _tempFanCleared.Clear();
+        _tempUndervoltGpus.Clear();
+        _tempUndervoltCleared.Clear();
+        var errors = new List<string>();
+        void Attempt(Action action) { try { action(); } catch (Exception ex) { errors.Add(ex.Message); } }
+        foreach (IntPtr gpu in _gpus)
+            if (gpu != IntPtr.Zero) Attempt(() =>
+            {
+                int index = Array.IndexOf(_gpus, gpu);
+                GpuBinding.Require(_gpuUuids.GetValueOrDefault(index), FanRunner.Uuid(gpu));
+                GpuTuning.Clear(gpu);
+            });
+        if (!_fanController.Tick(FanRunner.MappedIndexes(), _ => null)) errors.Add("部分显卡的自动风扇控制未能恢复。");
+        foreach (int index in FanState.StoredGpuIndexes()) Attempt(() => FanState.Delete(index));
+        foreach (int index in PersistedTuning.StoredGpuIndexes())
         {
-            DaemonControl.Stop();
-            foreach (IntPtr gpu in _gpus) if (gpu != IntPtr.Zero) GpuTuning.Clear(gpu);
-            int count = FanApi.GetDeviceCount();
-            for (int i = 0; i < count; i++) if (FanRunner.TryDevice(i, out IntPtr dev)) FanRunner.RestoreAuto(dev);
-            foreach (int index in FanState.StoredGpuIndexes()) FanState.Delete(index);
-            int[] tuningIndexes = PersistedTuning.StoredGpuIndexes().ToArray();
-            foreach (int index in tuningIndexes) PersistedTuning.Remove(index);
-            foreach (int index in tuningIndexes) UndervoltUiState.Delete(index);
-            Scheduler.Remove();
-            Scheduler.RemoveLegacyTasks();
-            _dirtyUndervoltGpus.Clear();
-            _undervoltDrafts.Clear();
-            LoadFanStateForGpu();
-            ConfigureVoltageRange();
-            SetStatus("已全部恢复出厂，开机任务与后台进程已清除。", Theme.Success);
-            UpdateTaskBadge();
-            UpdateDaemonLabel();
+            Attempt(() => PersistedTuning.Remove(index));
+            Attempt(() => UndervoltUiState.Delete(index));
         }
-        catch (Exception ex) { SetStatus("清除失败: " + ex.Message, Theme.Danger); }
+        Attempt(Scheduler.Remove);
+        Attempt(Scheduler.RemoveLegacyTasks);
+        _dirtyUndervoltGpus.Clear();
+        _undervoltDrafts.Clear();
+        LoadFanStateForGpu();
+        if (_anchors.Count >= 2) ConfigureVoltageRange();
+        _fanTimer.Start();
+        if (errors.Count > 0)
+        {
+            Diag.Log("恢复出厂部分失败: " + string.Join("; ", errors));
+            SetStatus("部分设置未能恢复，请检查日志并重试。", Theme.Warning);
+        }
+        else SetStatus("已恢复出厂，保存配置与开机任务已清除。", Theme.Success);
+        UpdateTaskBadge();
+        UpdateDaemonLabel();
     }
-
     private void SyncSchedulerToSavedSettings()
     {
         bool hasSettings = PersistedTuning.StoredGpuIndexes().Count > 0 || FanState.StoredGpuIndexes().Count > 0;
         if (hasSettings) Scheduler.Register(); else Scheduler.Remove();
     }
 
-    /// <summary>
-    /// One place decides whether the background task should run: a saved undervolt needs a
-    /// watchdog, a temperature curve needs a poller, and a fixed fan speed needs neither.
-    /// </summary>
-    private void SyncDaemonToSavedSettings()
-    {
-        if (HasSavedUndervolt() || HasSavedFanCurve()) DaemonControl.Start();
-        else DaemonControl.Stop();
-    }
-
     private static bool HasSavedUndervolt() => PersistedTuning.StoredGpuIndexes().Count > 0;
 
     private static bool HasSavedFanCurve()
-        => FanState.StoredGpuIndexes().Any(i => FanState.Load(i)?.ModeValue == FanState.Mode.Curve);
+        => FanState.StoredGpuIndexes().Any(i =>
+        {
+            try { return FanState.Load(i)?.ModeValue == FanState.Mode.Curve; }
+            catch { return true; }
+        });
 
     private void UpdateLiveStatus()
     {
@@ -861,15 +622,33 @@ internal sealed class MainForm : Form
         try
         {
             uint temp = FanRunner.TemperatureC(dev);
-            uint fan = FanRunner.FanPercent(dev, 0);
+            var fans = FanRunner.ReadFanTelemetry(dev);
             uint power = FanRunner.PowerMilliwatts(dev);
             uint coreMhz = FanRunner.CoreMhz(dev);
             uint mv = NvApi.GetCoreVoltageUv(gpu) / 1000;
             _curveEditor.CurrentTemp = (int)temp;
-            _gpuInfo.Text = $"温度 {temp}°C    风扇 {fan}%    功耗 {power / 1000}W    核心 {coreMhz} MHz    电压 {mv} mV";
+            UpdateMetrics(temp, 0, power / 1000, coreMhz, mv);
+            var first = fans.FirstOrDefault();
+            _metrics[1].Value = first?.Value ?? "—";
+            _metrics[1].Unit = first?.Unit ?? "%";
+            int? request = _fanController.RequestedPercent(SelectedIndex);
+            var range = FanApi.GetFanRange(dev);
+            string rangeText = range is { } r ? $"手动范围 {r.Minimum}–{r.Maximum}%" : "手动范围未提供";
+            string requestText = request is { } requested ? $"设定 {requested}% · " : "";
+            _fanSummary = requestText + (first?.Summary ?? "风扇读数不可用");
+            string details = requestText + rangeText + Environment.NewLine + string.Join(Environment.NewLine, fans.Select(f => f.Summary));
+            _tips.SetToolTip(_metrics[1], details);
+            _tips.SetToolTip(_daemonLabel, details);
+            _tips.SetToolTip(_fanFixed, rangeText + "。低于范围的设定由驱动允许的最低值执行；0% 不保证停转。");
             UpdateDaemonLabel();
         }
-        catch { }
+        catch
+        {
+            _fanSummary = null;
+            _curveEditor.CurrentTemp = -1;
+            foreach (var metric in _metrics) metric.Value = "—";
+            SetStatus("监测暂不可用，正在等待驱动恢复。", Theme.Warning);
+        }
     }
 
     private void UpdateTaskBadge()
@@ -885,7 +664,7 @@ internal sealed class MainForm : Form
         }
         else if (registered && hasSettings)
         {
-            _taskBadge.Text = "✓  重启自动生效";
+            _taskBadge.Text = "✓  登录自动应用";
             SetBadgeColors(Theme.Success);
         }
         else if (hasSettings)
@@ -907,8 +686,8 @@ internal sealed class MainForm : Form
     /// every state legible against the canvas.</summary>
     private void SetBadgeColors(Color fill)
     {
-        _taskBadge.BackColor = fill;
-        _taskBadge.ForeColor = Color.White;
+        _taskBadge.BackColor = Theme.Mix(Theme.Surface, fill, 0.14f);
+        _taskBadge.ForeColor = fill;
     }
 
     private void UpdateDaemonLabel()
@@ -916,6 +695,13 @@ internal sealed class MainForm : Form
         bool running = DaemonControl.IsRunning();
         bool curve = HasSavedFanCurve();
         bool undervolt = HasSavedUndervolt();
+
+        if (_controlLease is not null)
+        {
+            _daemonLabel.Text = _fanSummary ?? "● 窗口接管控制：风扇每 4 秒调节，关闭后交还后台";
+            _daemonLabel.ForeColor = Theme.Success;
+            return;
+        }
 
         if (_tempFanSettings.ContainsKey(SelectedIndex))
         {
@@ -978,81 +764,57 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        RestoreTemporaryChanges();
+        if (!_preview) RestoreTemporaryChanges();
+        _guiLease?.Dispose();
+        _guiLease = null;
         _pollTimer.Stop();
-        try { NvApi.Unload(); } catch { }
-        try { FanApi.Shutdown(); } catch { }
+        if (!_preview)
+        {
+            try { NvApi.Unload(); } catch { }
+            try { FanApi.Shutdown(); } catch { }
+        }
         base.OnFormClosed(e);
     }
 
     private void RestoreTemporaryChanges()
     {
         _fanTimer.Stop();
-
-        foreach (int index in _tempFanCleared.Concat(_tempFanSettings.Keys).Distinct())
-        {
-            try
-            {
-                var saved = FanState.Load(index);
-                if (saved is null || saved.ModeValue == FanState.Mode.Auto)
-                {
-                    if (FanRunner.TryDevice(index, out IntPtr autoDev)) FanRunner.RestoreAuto(autoDev);
-                }
-                else
-                {
-                    _tempFanSettings[index] = saved;
-                }
-            }
-            catch (Exception ex) { Diag.Log("恢复临时风扇设置失败: " + ex.Message); }
-        }
-
-        foreach (var (index, settings) in _tempFanSettings)
-        {
-            try
-            {
-                if (!FanRunner.TryDevice(index, out IntPtr dev) || FanRunner.FanCount(dev) == 0) continue;
-                if (settings.ModeValue == FanState.Mode.Fixed)
-                {
-                    FanRunner.SetAllFans(dev, (uint)Math.Clamp(settings.FixedPercent ?? 50, 0, 100));
-                }
-                else if (settings.Curve is { } curve)
-                {
-                    FanRunner.SetAllFans(dev, (uint)Math.Clamp(curve.FanPercentAt((int)FanRunner.TemperatureC(dev)), 0, 100));
-                }
-            }
-            catch (Exception ex) { Diag.Log("恢复已保存风扇设置失败: " + ex.Message); }
-        }
-
+        if (_controlLease is null) return;
         try
         {
-            IntPtr[] gpus = NvApi.EnumeratePhysicalGpus();
+            // Read saved state directly. Never feed temporary values back into the restore loop.
+            int[] fans = FanState.StoredGpuIndexes().Concat(_tempFanCleared).Concat(_tempFanSettings.Keys).Distinct().ToArray();
+            _fanController.RestoreSaved(fans, FanRunner.LoadSaved);
             foreach (int index in _tempUndervoltGpus.Concat(_tempUndervoltCleared).Distinct())
             {
-                if (index >= gpus.Length || PersistedTuning.StoredGpuIndexes().Contains(index)) continue;
-                try { GpuTuning.Clear(gpus[index]); } catch (Exception ex) { Diag.Log($"恢复 GPU {index} 默认电压失败: {ex.Message}"); }
-            }
-
-            foreach (int index in PersistedTuning.StoredGpuIndexes())
-            {
-                if (index >= gpus.Length) continue;
+                if (index >= _gpus.Length || PersistedTuning.StoredGpuIndexes().Contains(index)) continue;
                 try
                 {
-                    var doc = PersistedTuning.Load(index);
-                    var live = NvApi.GetVfCurve(gpus[index]);
-                    if (!GpuTuning.CurveVoltsPlausible(live)) continue;
-                    var reference = ReferenceCurve.Match(new SelectedGpu(gpus[index], index, gpus.Length));
-                    GpuTuning.ApplyExact(gpus[index], doc, reference.Curve, live, $"GPU {index} 的已保存降压");
+                    GpuBinding.Require(_gpuUuids.GetValueOrDefault(index), FanRunner.Uuid(_gpus[index]));
+                    GpuTuning.Clear(_gpus[index]);
                 }
+                catch (Exception ex) { Diag.Log($"恢复 GPU {index} 默认电压失败: {ex.Message}"); }
+            }
+            foreach (int index in PersistedTuning.StoredGpuIndexes())
+            {
+                try { Daemon.RestoreSaved(index); }
                 catch (Exception ex) { Diag.Log($"恢复 GPU {index} 已保存降压失败: {ex.Message}"); }
             }
         }
-        catch (Exception ex) { Diag.Log("恢复临时降压失败: " + ex.Message); }
-
-        _tempUndervoltGpus.Clear();
-        _tempUndervoltCleared.Clear();
-        _tempFanSettings.Clear();
-        _tempFanCleared.Clear();
-
-        if (HasSavedUndervolt() || HasSavedFanCurve()) DaemonControl.Start();
+        catch (Exception ex) { Diag.Log("恢复临时设置失败: " + ex.Message); }
+        finally
+        {
+            _tempUndervoltGpus.Clear();
+            _tempUndervoltCleared.Clear();
+            _tempFanSettings.Clear();
+            _tempFanCleared.Clear();
+            _controlLease.Dispose();
+            _controlLease = null;
+        }
+        try
+        {
+            DaemonControl.Start(recoverFans: true);
+        }
+        catch (Exception ex) { Diag.Log("重新启动后台失败: " + ex.Message); }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Security;
 using System.Security.Principal;
 using System.Text;
@@ -175,21 +175,7 @@ internal static class Scheduler
 
     private static (int Code, string Stdout, string Stderr) Run(string exe, params string[] args)
     {
-        var psi = new ProcessStartInfo(exe)
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        foreach (string arg in args) psi.ArgumentList.Add(arg);
-
-        using var proc = Process.Start(psi)!;
-        string stdout = proc.StandardOutput.ReadToEnd();
-        string stderr = proc.StandardError.ReadToEnd();
-        proc.WaitForExit();
-        return (proc.ExitCode, stdout, stderr);
+        var result = ChildProcess.Run(exe, args);
+        return (result.ExitCode, result.Output, result.Error);
     }
 }

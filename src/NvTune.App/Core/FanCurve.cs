@@ -14,8 +14,10 @@ internal sealed record FanCurve(IReadOnlyList<(int TempC, int Percent)> Points)
 
     public int FanPercentAt(int tempC)
     {
-        var pts = Points.OrderBy(p => p.TempC).ToArray();
-        if (pts.Length == 0) return 50;
+        var pts = Points.GroupBy(p => p.TempC)
+            .Select(g => (TempC: g.Key, Percent: Math.Clamp(g.Max(p => p.Percent), 0, 100)))
+            .OrderBy(p => p.TempC).ToArray();
+        if (pts.Length == 0) return 100;
         if (tempC <= pts[0].TempC) return pts[0].Percent;
         if (tempC >= pts[^1].TempC) return pts[^1].Percent;
 
@@ -26,7 +28,7 @@ internal sealed record FanCurve(IReadOnlyList<(int TempC, int Percent)> Points)
             if (tempC >= t0 && tempC <= t1)
             {
                 if (t1 == t0) return f1;
-                return (int)Math.Round(Hermite(pts, i, tempC));
+                return Math.Clamp((int)Math.Round(Hermite(pts, i, tempC)), Math.Min(f0, f1), Math.Max(f0, f1));
             }
         }
 
@@ -55,7 +57,14 @@ internal sealed record FanCurve(IReadOnlyList<(int TempC, int Percent)> Points)
         if (i == pts.Count - 1) return PointSlope(pts, pts.Count - 2, pts.Count - 1);
         double prev = PointSlope(pts, i - 1, i);
         double next = PointSlope(pts, i, i + 1);
-        return Math.Sign(prev) != Math.Sign(next) ? 0 : (prev + next) / 2;
+        if (prev == 0 || next == 0 || Math.Sign(prev) != Math.Sign(next)) return 0;
+        // Weighted harmonic mean (PCHIP): a steep neighbouring segment cannot cause
+        // overshoot across a much flatter segment with unequal temperature spacing.
+        double hPrev = pts[i].TempC - pts[i - 1].TempC;
+        double hNext = pts[i + 1].TempC - pts[i].TempC;
+        double w1 = 2 * hNext + hPrev;
+        double w2 = hNext + 2 * hPrev;
+        return (w1 + w2) / (w1 / prev + w2 / next);
     }
 
     private static double PointSlope(IReadOnlyList<(int TempC, int Percent)> pts, int a, int b)

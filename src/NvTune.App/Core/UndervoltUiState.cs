@@ -3,7 +3,6 @@ using System.Text.Json;
 namespace SimpleNvidiaUndervolt;
 
 /// <summary>
-/// <summary>
 /// The undervolt values the user last committed for one GPU, kept purely so the panel reopens on
 /// them instead of on a computed default. The authoritative document is <see cref="PersistedTuning"/>;
 /// this file only records the requested voltage/clock/memory offset, which a tuning document cannot
@@ -51,7 +50,7 @@ internal static class UndervoltUiState
             ["memMhz"] = values.MemMhz,
         };
         string json = JsonSerializer.Serialize(obj, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(FilePath(gpuIndex), json);
+        TuningDocuments.WriteFile(FilePath(gpuIndex), json, "降压界面参数");
     }
 
     public static void Delete(int gpuIndex)

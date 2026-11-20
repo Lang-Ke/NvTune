@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace SimpleNvidiaUndervolt;
 
@@ -9,7 +9,7 @@ namespace SimpleNvidiaUndervolt;
 /// </summary>
 internal static class DaemonControl
 {
-    internal const string MutexName = @"Local\NvTuneDaemon";
+    internal const string StopEventName = @"Global\NvTuneDaemonStop";
 
     private static string PidPath => Path.Combine(Persistence.DataDir(), "daemon.pid");
 
@@ -56,30 +56,33 @@ internal static class DaemonControl
     }
 
     private static bool IsOurs(Process proc)
-        => string.Equals(proc.ProcessName, AppName, StringComparison.OrdinalIgnoreCase);
-
-    private static string AppName => Path.GetFileNameWithoutExtension(Persistence.InstallExePath());
+        => string.Equals(proc.MainModule?.FileName, Persistence.InstallExePath(), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(proc.MainModule?.FileName, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Starts the installed copy with <c>--daemon</c>. Prefers the installed path: the daemon must
     /// keep running after the window closes, and starting it from a folder the user may delete would
     /// make it fail on the next logon.
     /// </summary>
-    public static void Start()
+    public static void Start(bool recoverFans = false)
     {
         if (IsRunning()) return;
 
-        string exe = File.Exists(Persistence.InstallExePath())
+        // A GUI standby must run the exact same build, even before the user saves/updates
+        // an older installed copy. An older daemon does not understand the ownership lease.
+        string exe = recoverFans
+            ? Environment.ProcessPath ?? throw new CliError("无法确定程序路径。")
+            : File.Exists(Persistence.InstallExePath())
             ? Persistence.InstallExePath()
             : Environment.ProcessPath ?? throw new CliError("无法确定程序路径。");
 
         var psi = new ProcessStartInfo(exe)
         {
-            Arguments = "--daemon --silent",
+            Arguments = "--daemon --silent" + (recoverFans ? " --recover-fans" : ""),
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
-            WorkingDirectory = Persistence.InstallDir(),
+            WorkingDirectory = Path.GetDirectoryName(exe)!,
         };
         Process.Start(psi);
         Diag.Log("已启动后台任务。");
@@ -87,24 +90,47 @@ internal static class DaemonControl
 
     public static void Stop()
     {
-        if (ReadPid() is { } pid)
+        try { DaemonStop.Stop(PidPath, RecordedProcess.Open, Diag.Log); }
+        catch (CliError) { throw; }
+        catch (Exception ex) { throw new CliError("停止后台任务失败: " + ex.Message); }
+    }
+
+    private sealed class RecordedProcess(Process process) : IRecordedDaemon
+    {
+        public static IRecordedDaemon? Open(int pid)
         {
-            try
+            try { return new RecordedProcess(Process.GetProcessById(pid)); }
+            catch (ArgumentException) { return null; }
+        }
+
+        public bool IsOurs => process.MainWindowHandle == IntPtr.Zero && DaemonControl.IsOurs(process);
+        public bool HasExited => process.HasExited;
+        public bool IsVerifiedLegacyDaemon
+        {
+            get
             {
-                using var proc = Process.GetProcessById(pid);
-                if (!proc.HasExited && IsOurs(proc))
-                {
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(3000);
-                    Diag.Log($"已停止后台任务 (PID {pid})。");
-                }
-            }
-            catch (Exception ex)
-            {
-                Diag.Log("停止后台任务失败: " + ex.Message);
+                if (!IsOurs || process.MainWindowHandle != IntPtr.Zero) return false;
+                string path = process.MainModule!.FileName;
+                var info = FileVersionInfo.GetVersionInfo(path);
+                var version = new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart, info.FilePrivatePart);
+                if (version >= new Version(1, 0, 2, 0)) return false;
+                // Check the live command line, not just its name/PID, before terminating a
+                // legacy daemon. WMI is used only for this one-time upgrade path.
+                string script = $"$ErrorActionPreference='Stop'; (Get-CimInstance Win32_Process -Filter 'ProcessId={process.Id}').CommandLine";
+                var result = ChildProcess.RunPowerShell(script);
+                return result.ExitCode == 0 && DaemonStop.IsLegacy(version, false, result.Output);
             }
         }
 
-        ClearPid();
+        public bool TryRequestStop()
+        {
+            if (!EventWaitHandle.TryOpenExisting(StopEventName, out var stopEvent)) return false;
+            using (stopEvent) stopEvent.Set();
+            return true;
+        }
+
+        public bool WaitForExit(int timeoutMs) => process.WaitForExit(timeoutMs);
+        public void TerminateLegacy() => process.Kill();
+        public void Dispose() => process.Dispose();
     }
 }

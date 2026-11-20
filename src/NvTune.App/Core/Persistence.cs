@@ -1,4 +1,3 @@
-﻿using System.Diagnostics;
 using System.Globalization;
 
 namespace SimpleNvidiaUndervolt;
@@ -95,7 +94,8 @@ internal static class Persistence
         string source = SourceDir();
         string target = InstallDir();
         Directory.CreateDirectory(target);
-        StopOtherAppProcesses();
+        // The GUI holds HardwareControlLease and has cooperatively stopped the daemon.
+        // Do not kill other windows or interrupt an in-flight hardware write during installation.
 
         foreach (string file in Directory.GetFiles(source, "NvTuneApp.*"))
         {
@@ -134,19 +134,6 @@ internal static class Persistence
     private static void RemoveMarkOfTheWeb(string path)
     {
         try { File.Delete(path + ":Zone.Identifier"); } catch { }
-    }
-
-    /// <summary>Closes any earlier NvTune copy before replacing its files. Windows locks a running
-    /// executable image, so an installed daemon or GUI left open would otherwise make the next
-    /// save fail while the new settings were ready to apply.</summary>
-    private static void StopOtherAppProcesses()
-    {
-        foreach (Process process in Process.GetProcessesByName("NvTuneApp"))
-        {
-            if (process.Id == Environment.ProcessId) continue;
-            try { process.Kill(entireProcessTree: true); process.WaitForExit(3000); }
-            catch (Exception ex) { Diag.Log("关闭旧 NvTune 进程失败: " + ex.Message); }
-        }
     }
 
     private static string Normalize(string? path)

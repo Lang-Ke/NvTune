@@ -54,16 +54,16 @@ internal sealed class FanCurveEditor : Control
 
     public void ResetToDefault() => SetPoints(FanCurve.Default.Points);
 
-    private static int S(int px) => Theme.Scaled(px);
+    private int S(int px) => Theme.Pixels(this, px);
 
     private RectangleF PlotRect
     {
         get
         {
-            int left = Math.Max(S(52), (int)(Width * 0.07f));
-            int top = S(26);
-            int rightInset = Math.Max(S(88), (int)(Width * 0.12f));
-            int bottomInset = S(64);
+            int left = S(48);
+            int top = S(30);
+            int rightInset = S(28);
+            int bottomInset = S(40);
             int plotWidth = Math.Max(S(60), Width - left - rightInset);
             int plotHeight = Math.Max(S(60), Height - top - bottomInset);
             return new RectangleF(left, top, plotWidth, plotHeight);
@@ -85,13 +85,12 @@ internal sealed class FanCurveEditor : Control
         // Every brush and pen is owned by one using block: the earlier code allocated brushes
         // inside the grid loops, so each resize frame leaked GDI handles until painting stalled
         // and the plot smeared.
-        float dpiScale = Math.Max(1f, Theme.DpiScale);
+        float dpiScale = Theme.ScaleFor(this);
         var plot = PlotRect;
         using var gridPen = new Pen(Theme.Grid, 1f);
         using var axisPen = new Pen(Theme.Axis, 1.2f);
-        using var minorFont = new Font("Segoe UI", 8f * dpiScale);
-        using var labelFont = new Font("Microsoft YaHei UI", 8.25f * dpiScale, FontStyle.Bold);
-        using var hintFont = new Font("Microsoft YaHei UI", 8f * dpiScale);
+        using var minorFont = Theme.DrawingFont(this, 8, family: "Segoe UI");
+        using var labelFont = Theme.DrawingFont(this, 8.25f, FontStyle.Bold);
         using var mutedBrush = new SolidBrush(Theme.Muted);
         using var textBrush = new SolidBrush(Theme.Text);
         using var warningBrush = new SolidBrush(Theme.Warning);
@@ -127,8 +126,7 @@ internal sealed class FanCurveEditor : Control
 
         g.DrawRectangle(axisPen, plot.X, plot.Y, plot.Width, plot.Height);
         var yAxisCaption = g.MeasureString("风扇转速 %", labelFont);
-        g.DrawString("风扇转速 %", labelFont, textBrush,
-            plot.X - yAxisCaption.Width - S(9), S(4));
+        g.DrawString("风扇转速 %", labelFont, textBrush, plot.X, S(2));
         var axisCaption = g.MeasureString("核心温度 °C", labelFont);
         float captionY = plot.Bottom + S(23);
         g.DrawString("核心温度 °C", labelFont, textBrush, plot.Right - axisCaption.Width, captionY);
@@ -149,7 +147,7 @@ internal sealed class FanCurveEditor : Control
                 Color.FromArgb(52, Theme.Curve), Color.FromArgb(4, Theme.Curve), 90f);
             g.FillPolygon(fill, area.ToArray());
 
-            using var curvePen = new Pen(Theme.Curve, 2.6f)
+            using var curvePen = new Pen(Theme.Curve, 2.4f * dpiScale)
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round,
@@ -169,7 +167,7 @@ internal sealed class FanCurveEditor : Control
                 : active ? Color.FromArgb(38, Theme.Curve) : Color.FromArgb(18, Theme.Curve));
             g.FillEllipse(halo, x - radius - S(5), y - radius - S(5), (radius + S(5)) * 2, (radius + S(5)) * 2);
             using var center = new SolidBrush(active ? Theme.Curve : Theme.PlotBackground);
-            using var ring = new Pen(Theme.Curve, 2.2f);
+            using var ring = new Pen(Theme.Curve, 1.8f * dpiScale);
             g.FillEllipse(center, x - radius, y - radius, radius * 2, radius * 2);
             g.DrawEllipse(ring, x - radius, y - radius, radius * 2, radius * 2);
             if (selected)
@@ -179,6 +177,9 @@ internal sealed class FanCurveEditor : Control
                     (radius + S(5)) * 2, (radius + S(5)) * 2);
             }
 
+            // All point labels overlap when points are densely packed. Show details for the
+            // active point and endpoints; the full curve remains editable with the keyboard.
+            if (!active && i != 0 && i != _points.Count - 1) continue;
             string caption = $"{t}°  {p}%";
             var size = g.MeasureString(caption, labelFont);
             float cx = Math.Clamp(x - size.Width / 2, plot.X + S(2), plot.Right - size.Width - S(2));
@@ -197,7 +198,7 @@ internal sealed class FanCurveEditor : Control
             using var markerPen = new Pen(Theme.Marker, 1.6f) { DashStyle = DashStyle.Dash };
             g.DrawLine(markerPen, x, plot.Y, x, plot.Bottom);
             using var markerBrush = new SolidBrush(Theme.Marker);
-            g.FillEllipse(markerBrush, x - 4.5f, YAtPct(pct) - 4.5f, 9, 9);
+            g.FillEllipse(markerBrush, x - S(4), YAtPct(pct) - S(4), S(8), S(8));
             string caption = $"当前 {_currentTemp}°C  →  {pct}%";
             var size = g.MeasureString(caption, labelFont);
             float cx = Math.Clamp(x + S(8), plot.X + S(4), plot.Right - size.Width - S(6));
@@ -319,7 +320,9 @@ internal sealed class FanCurveEditor : Control
         }
         else if (_points.Count < MaxPoints)
         {
-            _points.Add((TempAtX(e.X), PctAtY(e.Y)));
+            int temp = TempAtX(e.X);
+            if (_points.Any(p => p.TempC == temp)) return;
+            _points.Add((temp, PctAtY(e.Y)));
             _points.Sort((a, b) => a.TempC.CompareTo(b.TempC));
             _selectedIndex = null;
         }
