@@ -9,38 +9,22 @@ $destination = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
 }
-# Each run builds into a fresh directory, so stale DLLs/PDBs cannot enter the ZIP.
+# Each run builds into a fresh directory, so a successful check cannot depend on
+# stale DLLs, runtime configuration, or a separate launcher.
 $staging = Join-Path $repoRoot ('artifacts/package-' + [Guid]::NewGuid().ToString('N'))
 $appDirectory = Join-Path $staging 'app'
-$launcherDirectory = Join-Path $staging 'launcher'
-$packageDirectory = Join-Path $staging 'package'
-New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+$checkDirectory = Join-Path $staging 'check-working-directory'
+New-Item -ItemType Directory -Path $checkDirectory -Force | Out-Null
 
 function Invoke-DotNet([string[]]$Arguments) {
     & dotnet @Arguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet failed with exit code $LASTEXITCODE." }
 }
 
-Push-Location $repoRoot
-try {
-    Invoke-DotNet -Arguments @('publish', 'src/NvTune.App/NvTune.csproj', '-c', 'Release',
-        '-p:PublishProfile=WinX64', '-o', $appDirectory)
-    $published = @(Get-ChildItem -LiteralPath $appDirectory -File)
-    if ($published.Count -ne 1 -or $published[0].Name -ne 'NvTuneApp.exe' -or
-        @(Get-ChildItem -LiteralPath $appDirectory -Directory).Count -ne 0) {
-        throw 'Expected exactly one published NvTuneApp.exe, without sidecar files.'
-    }
-    Invoke-DotNet -Arguments @('build', 'src/NvTune.Launcher/Launcher.csproj', '-c', 'Release',
-        '-o', $launcherDirectory)
-    Copy-Item -LiteralPath (Join-Path $appDirectory 'NvTuneApp.exe') -Destination $packageDirectory
-    Copy-Item -LiteralPath (Join-Path $launcherDirectory '启动器.exe') -Destination $packageDirectory
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $packageDirectory
-
-    # Only this mode creates an offscreen sample UI. It never loads GPU APIs, installs
-    # the app, changes saved configurations, or registers a Windows task.
-    $start = [Diagnostics.ProcessStartInfo]::new((Join-Path $packageDirectory 'NvTuneApp.exe'))
-    $start.Arguments = '--verify-package'
-    $start.WorkingDirectory = $packageDirectory
+function Invoke-AppCheck([string]$Executable, [string]$Argument) {
+    $start = [Diagnostics.ProcessStartInfo]::new($Executable)
+    $start.Arguments = $Argument
+    $start.WorkingDirectory = $checkDirectory
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -52,40 +36,51 @@ try {
         $stderr = $process.StandardError.ReadToEndAsync()
         if (!$process.WaitForExit(30000)) {
             $process.Kill()
-            throw 'Package verification timed out.'
+            throw "Application check $Argument timed out."
         }
         $report = $stdout.GetAwaiter().GetResult()
         $errors = $stderr.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0 -or !$report.Contains('Deployment: single-file') -or
-            !$report.Contains('Package check passed. No GPU APIs called.')) {
-            throw "Package verification failed (exit $($process.ExitCode)). $report $errors"
+        if ($process.ExitCode -ne 0) {
+            throw "Application check $Argument failed (exit $($process.ExitCode)). $report $errors"
         }
-        Write-Output $report.Trim()
+        return $report.Trim()
     } finally {
         $process.Dispose()
     }
+}
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    $stagedZip = Join-Path $staging 'NvTune-win-x64.zip'
-    [IO.Compression.ZipFile]::CreateFromDirectory($packageDirectory, $stagedZip,
-        [IO.Compression.CompressionLevel]::Optimal, $false)
-    $zip = [IO.Compression.ZipFile]::OpenRead($stagedZip)
-    try {
-        $expected = @('LICENSE', 'NvTuneApp.exe', '启动器.exe')
-        $actual = @($zip.Entries.FullName | Sort-Object)
-        if (@(Compare-Object ($expected | Sort-Object) $actual).Count -ne 0) {
-            throw 'ZIP content does not match the three-file release manifest.'
-        }
-    } finally {
-        $zip.Dispose()
+Push-Location $repoRoot
+try {
+    Invoke-DotNet -Arguments @('publish', 'src/NvTune.App/NvTune.csproj', '-c', 'Release',
+        '-p:PublishProfile=WinX64', '-o', $appDirectory)
+    $published = @(Get-ChildItem -LiteralPath $appDirectory -File)
+    if ($published.Count -ne 1 -or $published[0].Name -ne 'NvTuneApp.exe' -or
+        @(Get-ChildItem -LiteralPath $appDirectory -Directory).Count -ne 0) {
+        throw 'Expected exactly one published NvTuneApp.exe, without sidecar files.'
     }
-    $zipPath = Join-Path $destination 'NvTune-win-x64.zip'
-    Copy-Item -LiteralPath $stagedZip -Destination $zipPath -Force
-    $digest = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $destination 'SHA256SUMS.txt'),
-        "$digest  NvTune-win-x64.zip`n", [Text.UTF8Encoding]::new($false))
-    Get-Item -LiteralPath $zipPath | Select-Object Name, Length, FullName
+
+    # These modes never load GPU APIs, install files, change saved configurations,
+    # or register a Windows task. Run from an empty working directory as well as
+    # a fresh publish directory to catch dependencies on neighboring files.
+    $executable = Join-Path $appDirectory 'NvTuneApp.exe'
+    $report = Invoke-AppCheck -Executable $executable -Argument '--verify-package'
+    if (!$report.Contains('Deployment: single-file') -or
+        !$report.Contains('Package check passed. No GPU APIs called.')) {
+        throw "Single-file verification failed. $report"
+    }
+    Write-Output $report
+    $license = Invoke-AppCheck -Executable $executable -Argument '--license'
+    $expectedLicense = [IO.File]::ReadAllText((Join-Path $repoRoot 'LICENSE'))
+    if ($license.Replace("`r`n", "`n").Trim() -cne $expectedLicense.Replace("`r`n", "`n").Trim()) {
+        throw 'Embedded license does not match the complete repository LICENSE.'
+    }
+    Write-Output 'Embedded license check passed.'
+
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+    $executablePath = Join-Path $destination 'NvTuneApp.exe'
+    Copy-Item -LiteralPath $executable -Destination $executablePath -Force
+    $digest = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Get-Item -LiteralPath $executablePath | Select-Object Name, Length, FullName
     Write-Output "SHA256: $digest"
 } finally {
     Pop-Location

@@ -15,12 +15,11 @@ jobs:
       - run: dotnet build NvTune.slnx -c Release
       - run: dotnet run --project tests/NvTune.Tests -c Release --no-build
       - run: dotnet run --project tests/NvTune.Tests -c Release --no-build -- --render-ui artifacts/ui
-      - name: Publish and verify the three-file Windows package
+      - name: Publish and verify the standalone Windows executable
         shell: pwsh
         run: ./scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
       - uses: actions/upload-artifact@v4
         with:
-          name: NvTune-win-x64
-          path: |
-            artifacts/release/NvTune-win-x64.zip
-            artifacts/release/SHA256SUMS.txt
+          name: NvTuneApp-win-x64
+          path: artifacts/release/NvTuneApp.exe
+          if-no-files-found: error

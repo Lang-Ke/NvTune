@@ -1,5 +1,13 @@
 # 修订记录
 
+## 1.0.8（2026-11-20）
+
+- 下载和发布简化为一个 `NvTuneApp.exe`，无需 ZIP、旁置文件或独立启动器；GitHub Release 展示 SHA-256 校验值。
+- 移除 net48 启动器项目，改由主程序自带的 .NET 启动宿主检测运行时并提供安装入口。仍需安装 .NET 10 Desktop Runtime（x64）与 NVIDIA 驱动，未将运行时打入 EXE。
+- 将完整 MIT 许可证与版权声明嵌入主程序，可通过“关于”、F1 或 `--license` 查看；源码中的 `LICENSE` 保留。
+- 点击“保存并开机应用”更新稳定安装目录时，精确清理旧启动器及不再需要的旧主程序配套文件，保留 `data` 配置。
+- 发布脚本直接生成主程序并打印 SHA-256；显卡调校、风扇控制与后台行为保持原有逻辑。
+
 ## 1.0.7（2026-11-20）
 
 - Windows x64 主程序改为单文件发布，将原来的 `NvTuneApp.dll`、`NvTuneApp.deps.json` 和 `NvTuneApp.runtimeconfig.json` 合入 `NvTuneApp.exe`，避免分散文件被误删后无法启动。

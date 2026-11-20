@@ -1,5 +1,11 @@
 ﻿using SimpleNvidiaUndervolt;
 
+if (args is ["--license"])
+{
+    Console.Write(LicenseInfo.Text);
+    return 0;
+}
+
 if (args is ["--version"])
 {
     Console.WriteLine($"NvTune {Product.Version}");

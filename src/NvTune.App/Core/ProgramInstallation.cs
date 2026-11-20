@@ -11,7 +11,7 @@ internal static class ProgramInstallation
 
     private static readonly string[] LegacyCompanions =
     {
-        "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json", "NvTuneApp.pdb"
+        "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json", "NvTuneApp.pdb", "启动器.exe"
     };
 
     internal static void Install(string source, string target, bool singleFile,

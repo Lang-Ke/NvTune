@@ -74,7 +74,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = "NvTune 1.0.7 · NVIDIA 降压与风扇";
+        Text = "NvTune 1.0.8 · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);
@@ -753,6 +753,12 @@ internal sealed partial class MainForm : Form
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        if (e.KeyCode == Keys.F1)
+        {
+            e.Handled = e.SuppressKeyPress = true;
+            LicenseInfo.Show(this);
+            return;
+        }
         if (e.Control && e.KeyCode == Keys.S)
         {
             e.Handled = e.SuppressKeyPress = true;

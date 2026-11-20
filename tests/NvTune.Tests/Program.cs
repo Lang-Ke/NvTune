@@ -326,7 +326,7 @@ internal static class Program
                 Directory.CreateDirectory(source);
                 Directory.CreateDirectory(Path.Combine(source, "data"));
                 Directory.CreateDirectory(Path.Combine(target, "data"));
-                string[] companions = { "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json", "NvTuneApp.pdb" };
+                string[] companions = { "NvTuneApp.dll", "NvTuneApp.deps.json", "NvTuneApp.runtimeconfig.json", "NvTuneApp.pdb", "启动器.exe" };
                 File.WriteAllText(Path.Combine(source, "NvTuneApp.exe"), "new bundled program");
                 File.WriteAllText(Path.Combine(target, "NvTuneApp.exe"), "old program");
                 foreach (string name in companions)

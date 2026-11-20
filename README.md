@@ -25,11 +25,11 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 
 ## 📦 下载
 
-从 [Releases](../../releases) 下载 `NvTune-win-x64.zip`。解压后运行 `启动器.exe`。
+从 [Releases](../../releases) 下载 `NvTuneApp.exe`，直接双击运行，无需解压。
 
-[直接下载最新版 Windows x64 程序包](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTune-win-x64.zip)
+[直接下载最新版 Windows x64 主程序](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTuneApp.exe)
 
-从 1.0.7 起，程序包只保留 `NvTuneApp.exe`、`启动器.exe` 和 `LICENSE`。主程序的 DLL、依赖清单和运行时配置已合入 `NvTuneApp.exe`；更新记录见 GitHub Release 或源码中的 `CHANGELOG.md`。
+从 1.0.8 起，下载文件只有一个 `NvTuneApp.exe`。运行时检测由主程序自带的 .NET 启动宿主处理，原来的独立启动器已移除；主程序 DLL、依赖清单、运行时配置和完整 MIT 版权声明都已嵌入 EXE。更新记录和 SHA-256 校验值见 GitHub Release。
 
 ### 系统要求
 
@@ -40,21 +40,20 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 | .NET | .NET 10 Desktop Runtime (x64) |
 | 权限 | 管理员（修改电压与风扇必须提权） |
 
-缺少 .NET 时启动器会弹窗并自动跳转
-[dotnet.microsoft.com/zh-cn/download](https://dotnet.microsoft.com/zh-cn/download)。
+缺少所需运行时时，主程序启动宿主会显示安装提示并提供下载入口。请安装 **.NET 10 Desktop Runtime（x64）**；仅安装基础 .NET Runtime 不足以运行桌面界面。
 不需要 SDK、不需要 FanControl 或其它第三方软件。
 
-单文件发布仍依赖本机的 .NET 10 Desktop Runtime（x64）和 NVIDIA 驱动，程序包不包含这些组件。已安装运行时的用户也可以直接运行 `NvTuneApp.exe`。
+单文件发布仍依赖本机的 .NET 10 Desktop Runtime（x64）和 NVIDIA 驱动，EXE 不包含这些组件。
 
 ## 🚀 使用
 
-1. 解压压缩包到任意文件夹，双击 `启动器.exe`。
+1. 下载 `NvTuneApp.exe` 到任意文件夹，双击运行。
 2. 在顶部选择显卡，设置电压上限 / 目标频率 / 显存偏移。
 3. 切换风扇模式：自动、固定转速，或拖动曲线设置温度-转速对应关系。
 4. 点 **「保存并开机应用」** —— 保存到 `C:\Program Files\NvTune`，注册开机任务，重启自动生效。
-5. 移动或删除解压目录不影响已安装的配置。
+5. 移动或删除下载的 EXE 不影响已安装的配置。
 
-从旧版更新并保存时，会清理安装目录中不再需要的旧主程序 DLL、JSON 配套文件和 PDB 调试文件，保留 `data` 中的配置。
+从旧版更新时，运行新下载的 EXE 并点击“保存并开机应用”，即可更新稳定安装目录中的程序。更新会清理安装目录中不再需要的旧启动器、主程序 DLL、JSON 配套文件和 PDB 调试文件，保留 `data` 中的配置。
 
 ### 按钮语义
 
@@ -104,27 +103,27 @@ cd NvTune
 dotnet build src\NvTune.App -c Release
 ```
 
-生成与 Release 相同的 Windows x64 程序包：
+生成与 Release 相同的 Windows x64 单文件主程序：
 
 ```powershell
 pwsh -File scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
 ```
 
-输出 `NvTune-win-x64.zip` 和 `SHA256SUMS.txt`。脚本发布单文件主程序、构建 net48 启动器，并只将上述三个文件放入 ZIP。启动器用于在没有 .NET 10 的机器上检测并引导下载。
+输出只有 `NvTuneApp.exe`，脚本会打印其 SHA-256 校验值，并验证单文件部署和软件预览自检。无需构建独立启动器或另外打包 ZIP。
 
-主程序支持 `--version` 查询版本和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
+主程序支持 `--version` 查询版本、`--license` 查看完整 MIT 版权声明和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
 
 ## 📁 项目结构
 
 ```
 NvTune/
 ├── src/
-│   ├── NvTune.App/        主程序（WinForms, .NET 10）
-│   │   ├── MainForm.cs         主界面
-│   │   ├── FanCurveEditor.cs   风扇曲线编辑器
-│   │   ├── Theme.cs            界面配色
-│   │   └── Core/               NVAPI / NVML 交互、持久化、后台进程
-│   └── NvTune.Launcher/   启动器（net48，运行时检测 + 下载引导）
+│   └── NvTune.App/        主程序（WinForms, .NET 10）
+│       ├── MainForm.cs         主界面
+│       ├── FanCurveEditor.cs   风扇曲线编辑器
+│       ├── Theme.cs            界面配色
+│       └── Core/               NVAPI / NVML 交互、持久化、后台进程
+├── scripts/Publish-Release.ps1 单文件发布与校验
 └── NvTune.slnx            解决方案
 ```
 
@@ -139,3 +138,5 @@ NvTune/
 ## 📄 许可证
 
 [MIT](LICENSE) — 基于 [vuplea/simple-nvidia-undervolt](https://github.com/vuplea/simple-nvidia-undervolt) 派生。
+
+独立 EXE 内嵌完整许可证与版权声明，可通过主界面“关于”、F1 或 `--license` 查看。

@@ -193,7 +193,16 @@ internal sealed partial class MainForm
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(142)));
         footer.RowStyles.Clear(); footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         footer.Controls.Add(Theme.Cell(Theme.PrimaryButton("保存并开机应用", (_, _) => SaveAllSettings(), 152), Padding.Empty), 0, 0);
-        footer.Controls.Add(new Label { Text = "Ctrl + S", ForeColor = Theme.Muted, Font = Theme.SmallFont(), AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(D(14), 0, 0, 0) }, 1, 0);
+        var about = new LinkLabel
+        {
+            Text = "Ctrl + S · 关于", LinkArea = new LinkArea(11, 2),
+            ForeColor = Theme.Muted, LinkColor = Theme.Accent, ActiveLinkColor = Theme.Text,
+            VisitedLinkColor = Theme.Accent, Font = Theme.SmallFont(), AutoSize = true,
+            Anchor = AnchorStyles.Left, Margin = new Padding(D(14), 0, 0, 0),
+        };
+        _tips.SetToolTip(about, "Ctrl + S 保存；F1 查看版本与开源许可证");
+        about.LinkClicked += (_, _) => LicenseInfo.Show(this);
+        footer.Controls.Add(about, 1, 0);
         var reset = Theme.SecondaryButton("全部恢复出厂", (_, _) => ClearEverything(), 132);
         reset.ForeColor = Theme.Danger;
         footer.Controls.Add(Theme.Cell(reset, new Padding(D(10), 0, 0, 0)), 2, 0);
