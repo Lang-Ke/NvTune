@@ -12,14 +12,25 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: dotnet build NvTune.slnx -c Release
-      - run: dotnet run --project tests/NvTune.Tests -c Release --no-build
-      - run: dotnet run --project tests/NvTune.Tests -c Release --no-build -- --render-ui artifacts/ui
-      - name: Publish and verify the standalone Windows executable
+      - name: Build the installed edition
+        run: dotnet build NvTune.slnx -c Release -p:Portable=false
+      - name: Test the installed edition
+        run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=false --no-build
+      - name: Render the installed edition UI
+        run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=false --no-build -- --render-ui artifacts/ui-installed
+      - name: Build the portable edition
+        run: dotnet build NvTune.slnx -c Release -p:Portable=true
+      - name: Test the portable edition
+        run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=true --no-build
+      - name: Render the portable edition UI
+        run: dotnet run --project tests/NvTune.Tests -c Release -p:Portable=true --no-build -- --render-ui artifacts/ui-portable
+      - name: Publish and verify both standalone Windows executables
         shell: pwsh
         run: ./scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
       - uses: actions/upload-artifact@v4
         with:
-          name: NvTuneApp-win-x64
-          path: artifacts/release/NvTuneApp.exe
+          name: NvTune-win-x64
+          path: |
+            artifacts/release/NvTuneApp.exe
+            artifacts/release/NvTunePortable.exe
           if-no-files-found: error

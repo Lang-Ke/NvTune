@@ -17,6 +17,7 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
   平滑无跳变。双击空白加点、双击圆点删点、拖动调整；单击圆点后可用方向键微调
   （左右 ±1 °C、上下 ±1 %，按住 Shift 步进 5）。
 - **风扇模式** — 自动 / 固定转速 / 温度曲线 三种模式一键切换。
+- **两个版本** — 安装版保存在 Program Files；便携版的配置和日志保存在 EXE 同目录的 `data` 中。
 - **重启生效** — 「保存并开机应用」后由 Windows 计划任务在每次登录时自动重新应用，
   睡眠唤醒、驱动重置后自动补回。
 - **低资源占用** — 窗口关闭后，固定转速 / 自动模式且无降压时后台应用一次后退出；温度曲线后台每 4 秒读温调节；
@@ -26,11 +27,16 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
 
 ## 📦 下载
 
-从 [Releases](../../releases) 下载 `NvTuneApp.exe`，直接双击运行，无需解压。
+从 [Releases](../../releases) 按需要选择一个版本，直接双击运行，无需解压。
 
-[直接下载最新版 Windows x64 主程序](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTuneApp.exe)
+| 版本 | 下载 | 配置和日志位置 | 登录自动应用 |
+|------|------|----------------|--------------|
+| 安装版 | [NvTuneApp.exe](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTuneApp.exe) | `C:\Program Files\NvTune\data` | 运行保存到 Program Files 的程序 |
+| 便携版 | [NvTunePortable.exe](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTunePortable.exe) | EXE 同目录的 `data` | 核验并运行当前便携 EXE |
 
-从 1.0.8 起，下载文件只有一个 `NvTuneApp.exe`。运行时检测由主程序自带的 .NET 启动宿主处理，原来的独立启动器已移除；主程序 DLL、依赖清单和运行时配置都已嵌入 EXE。更新记录和 SHA-256 校验值见 GitHub Release。
+每个版本都只有一个 EXE。运行时检测由主程序自带的 .NET 启动宿主处理；主程序 DLL、依赖清单和运行时配置都已嵌入 EXE。更新记录和两份文件的 SHA-256 校验值见 GitHub Release。
+
+便携版请放在自己选择的可写文件夹中；安装版点击“保存并开机应用”后会复制到 Program Files。两个版本都会产生配置、日志和运行状态文件。两者共用显卡控制权和一个登录任务，不能同时控制显卡；最后保存的版本负责下次登录自动应用。
 
 ### 系统要求
 
@@ -48,13 +54,25 @@ NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（�
 
 ## 🚀 使用
 
-1. 下载 `NvTuneApp.exe` 到任意文件夹，双击运行。
+1. 下载 `NvTuneApp.exe` 或 `NvTunePortable.exe`，双击运行。便携版请放进准备长期使用的可写文件夹。
 2. 在顶部选择显卡，设置目标电压（mV）/ 目标频率 / 显存偏移。
 3. 切换风扇模式：自动、固定转速，或拖动曲线设置温度-转速对应关系。
-4. 点 **「保存并开机应用」** —— 保存到 `C:\Program Files\NvTune`，注册开机任务，重启自动生效。
-5. 移动或删除下载的 EXE 不影响已安装的配置。
+4. 点 **「保存并开机应用」** —— 安装版保存到 `C:\Program Files\NvTune`；便携版保存到 EXE 同目录的 `data`，注册对应版本的登录任务。
+5. 便携版搬迁时一起移动 EXE 和 `data`，从新位置运行后再次保存，更新任务路径。安装版保存完成后，移动或删除原下载文件不影响已安装的程序和配置。
 
-从旧版更新时，运行新下载的 EXE 并点击“保存并开机应用”，即可更新稳定安装目录中的程序。更新会清理安装目录中不再需要的旧启动器、主程序 DLL、JSON 配套文件和 PDB 调试文件，保留 `data` 中的配置。
+安装版更新时，运行新下载的 `NvTuneApp.exe` 并点击“保存并开机应用”，更新 Program Files 中的程序并保留已保存配置。
+
+便携版升级时，先关闭窗口，在程序所在目录的 PowerShell 中运行下面的命令，安全停止后台；若停止失败会提示原因，请处理后重试。
+
+```powershell
+Start-Process .\NvTunePortable.exe -ArgumentList '--stop-background' -Wait
+```
+
+停止后台会交还自动风扇控制，保留配置和登录任务。随后用新版 EXE 替换原文件，保留旁边的 `data`，运行新版后再次点击“保存并开机应用”。登录任务会核验保存时的 EXE 校验值，替换 EXE 后需重新保存才能继续自动应用。
+
+首次从旧安装版升级时，请先关闭旧版窗口。便携版会兼容已有旧安装的后台接管，并将原 `C:\Program Files\NvTune\data` 的设置导入便携目录；已有便携配置优先。核对参数后点击“保存并开机应用”，将登录任务切换到当前 EXE。旧安装目录中的文件不会自动删除；升级后请使用新版，避免同时启动不支持全局控制锁的旧版本。
+
+两个版本的配置都绑定显卡 UUID。把便携文件夹复制到另一台机器或更换显卡后，请重新核对和保存设置；UUID 不匹配的旧配置不会直接写入新显卡。
 
 ### 按钮语义
 
@@ -84,6 +102,10 @@ Windows + .NET 10 SDK 下运行：
 ```powershell
 dotnet build NvTune.slnx -c Release
 dotnet run --project tests/NvTune.Tests -c Release --no-build
+
+# 便携模式也需重新编译后检查
+dotnet build NvTune.slnx -c Release -p:Portable=true
+dotnet run --project tests/NvTune.Tests -c Release -p:Portable=true --no-build
 ```
 
 检查使用模拟风扇接口和临时文件，不初始化或写入显卡，不安装程序或注册计划任务。
@@ -110,9 +132,9 @@ dotnet build src\NvTune.App -c Release
 pwsh -File scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
 ```
 
-输出只有 `NvTuneApp.exe`，脚本会打印其 SHA-256 校验值，并验证单文件部署和软件预览自检。无需构建独立启动器或另外打包 ZIP。
+脚本分别生成安装版 `NvTuneApp.exe` 和便携版 `NvTunePortable.exe`，打印各自 SHA-256 校验值，并验证单文件部署和软件预览自检。无需构建独立启动器或另外打包 ZIP。便携版使用 `-p:Portable=true` 编译开关；默认构建为安装版，重命名 EXE 不会切换版本。
 
-主程序支持 `--version` 查询版本和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
+主程序支持 `--version` 查询版本、`--verify-package` 软件自检，以及 `--stop-background` 在关闭窗口后安全停止后台；自检不初始化显卡、不安装程序、不注册计划任务。
 
 ## 📁 项目结构
 

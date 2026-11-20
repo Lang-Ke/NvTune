@@ -2,13 +2,11 @@ namespace NvTune;
 
 /// <summary>
 /// The tuning document every persisting run stores for the logon task, which re-applies it with
-/// <c>tune --apply-persisted</c>. Persisting the resolved offsets as data — rather than a command
+/// <c>--daemon</c>. Persisting the resolved offsets as data — rather than a command
 /// line to re-plan — makes the logon re-apply exact: per-anchor deltas are temperature-independent,
 /// so nothing is re-derived from a boot-time curve read. Stored per GPU as a JSON file in the
-/// install directory's data subfolder (see <see cref="Persistence.DataFilePath"/>) — the same
-/// document <c>--out-tuning-file</c> exports, so it can be read or copied directly — which is
-/// under Program Files and thus admin-only writable, so the elevated logon re-apply never
-/// consumes user-writable data.
+/// edition's data directory (see <see cref="Persistence.DataFilePath"/>). Parsed settings
+/// must match the live GPU identity and curve before the daemon writes them.
 /// </summary>
 internal static class PersistedTuning
 {

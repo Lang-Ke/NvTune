@@ -14,6 +14,17 @@ internal interface IRecordedDaemon : IDisposable
 
 internal static class DaemonStop
 {
+    internal static void StopGlobal(Func<bool> isRunning, Action requestStop, Action<int> delay,
+        int attempts = 300)
+    {
+        for (int i = 0; i < attempts && isRunning(); i++)
+        {
+            requestStop();
+            delay(50);
+        }
+        if (isRunning()) throw new CliError("后台未能安全停止，请稍后重试。当前操作已取消。");
+    }
+
     internal static bool IsLegacy(Version version, bool hasWindow, string commandLine)
         => version >= new Version(1, 0, 0, 0) && version < new Version(1, 0, 2, 0) && !hasWindow
             && Regex.IsMatch(commandLine, @"(?:^|\s)--daemon(?:\s|$)", RegexOptions.CultureInvariant);

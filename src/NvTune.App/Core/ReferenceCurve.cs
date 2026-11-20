@@ -4,10 +4,8 @@ namespace NvTune;
 /// The saved stock V/F reference curve tuning plans from, so the same command always produces the
 /// same tuning: the live curve shifts slightly with temperature (and boost state), so planning from
 /// a fresh read bakes the capture conditions into the result, while planning from a saved reference
-/// is reproducible. Stored per GPU as a <see cref="ReferenceCurveDoc"/> JSON file in the install
-/// directory's data subfolder (see <see cref="Persistence.DataFilePath"/>) — the same document
-/// <c>set-reference-curve</c> exports and imports, machine-wide like the tuning itself, and
-/// admin-only writable (Program Files) so nothing elevated ever consumes user-writable data — keyed
+/// is reproducible. Stored per GPU as a <see cref="ReferenceCurveDoc"/> JSON file in the
+/// edition's data directory (see <see cref="Persistence.DataFilePath"/>), keyed
 /// by <see cref="GpuIdentity"/> and cross-checked against the live curve's anchor voltages (which
 /// are static per card) so a hardware or driver change is noticed instead of silently planning
 /// from a stale curve.

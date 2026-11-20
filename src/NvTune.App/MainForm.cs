@@ -49,8 +49,9 @@ internal sealed partial class MainForm : Form
     private readonly System.Windows.Forms.Timer _fanTimer = new() { Interval = 4000 };
     private readonly FanController _fanController = FanRunner.CreateController();
     private readonly Stopwatch _undervoltClock = Stopwatch.StartNew();
-    private FileStream? _controlLease;
-    private FileStream? _guiLease;
+    private IDisposable? _controlLease;
+    private IDisposable? _guiLease;
+    private bool _probingDriver;
 
     private IntPtr[] _gpus = Array.Empty<IntPtr>();
     private readonly Dictionary<int, string> _gpuUuids = new();
@@ -74,7 +75,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = "NvTune 1.0.13 · NVIDIA 降压与风扇";
+        Text = $"NvTune 1.0.14 · {(Persistence.IsPortable ? "便携版" : "安装版")} · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);
@@ -111,23 +112,34 @@ internal sealed partial class MainForm : Form
     {
         try
         {
-            await Task.Run(() =>
+            _guiLease = GlobalControlLease.TryAcquire(GlobalControlLease.GuiName,
+                Persistence.LegacyLockPath("gui-instance.lock"))
+                ?? throw new CliError("已有 NvTune 窗口正在运行，请先关闭后重试。");
+            // These checks only read the driver and configuration. Keep the existing daemon
+            // controlling the GPU until the new window is ready to take ownership.
+            _probingDriver = true;
+            try
             {
-                NvApi.Initialize();
-                FanRunner.Initialize();
-                _gpus = NvApi.EnumeratePhysicalGpus();
-            });
+                await Task.Run(() =>
+                {
+                    NvApi.Initialize();
+                    FanRunner.Initialize();
+                    _gpus = NvApi.EnumeratePhysicalGpus();
+                });
+            }
+            finally { _probingDriver = false; }
+            if (IsDisposed || Disposing) { ShutdownDriver(); return; }
             if (_gpus.Length == 0)
             {
                 SetStatus("未检测到 NVIDIA 显卡。", Theme.Danger);
                 return;
             }
 
-            if (IsDisposed || Disposing) return;
-            _guiLease = HardwareControlLease.TryAcquire(Path.Combine(Persistence.DataDir(), "gui-instance.lock"))
-                ?? throw new CliError("已有 NvTune 窗口正在运行。");
+            // The GUI lease excludes settings writers; the daemon only reads these JSON files.
+            Persistence.InitializePortableData();
             DaemonControl.Stop();
-            _controlLease = HardwareControlLease.TryAcquire()
+            _controlLease = GlobalControlLease.TryAcquire(GlobalControlLease.HardwareName,
+                Persistence.LegacyLockPath("hardware-control.lock"))
                 ?? throw new CliError("另一个 NvTune 窗口或后台正在控制显卡，请关闭后重试。");
             DaemonControl.Start(recoverFans: true);
             _fanTimer.Start();
@@ -141,7 +153,6 @@ internal sealed partial class MainForm : Form
             }
             _gpuSelector.SelectedIndex = 0;
             _loading = false;
-            await Task.Run(() => _anchors = NvApi.GetVfCurve(SelectedGpuHandle));
             OnGpuChanged();
             _pollTimer.Start();
             SetStatus("就绪。「保存并开机应用」重启后仍然生效；两处「本次应用」仅在本次运行期间生效。", Theme.Success);
@@ -152,11 +163,18 @@ internal sealed partial class MainForm : Form
         catch (Exception ex)
         {
             _fanTimer.Stop();
+            bool ownedHardware = _controlLease is not null;
             _controlLease?.Dispose();
             _controlLease = null;
+            if (ownedHardware)
+            {
+                try { DaemonControl.Start(recoverFans: true); }
+                catch (Exception recovery) { Diag.Log("初始化失败后恢复后台失败: " + recovery.Message); }
+            }
             _guiLease?.Dispose();
             _guiLease = null;
             _gpus = Array.Empty<IntPtr>();
+            if (IsDisposed || Disposing) { ShutdownDriver(); return; }
             UpdateHotspotMetric(HotspotReading.MonitoringUnavailable);
             SetStatus("初始化失败: " + ex.Message, Theme.Danger);
             Diag.Log("初始化失败: " + ex);
@@ -355,7 +373,7 @@ internal sealed partial class MainForm : Form
         try
         {
             RequireSelectedGpuIdentity();
-            DaemonControl.Stop(); // Stop the standby copy before updating installed program files.
+            DaemonControl.Stop();
             Persistence.EnsureInstalled();
             if (_tempUndervoltCleared.Contains(SelectedIndex))
             {
@@ -764,12 +782,16 @@ internal sealed partial class MainForm : Form
         _guiLease?.Dispose();
         _guiLease = null;
         _pollTimer.Stop();
-        if (!_preview)
-        {
-            try { NvApi.Unload(); } catch { }
-            try { FanApi.Shutdown(); } catch { }
-        }
+        // A native driver probe cannot be cancelled halfway through. Its continuation unloads
+        // the APIs after it finishes if the window was closed while it was running.
+        if (!_preview && !_probingDriver) ShutdownDriver();
         base.OnFormClosed(e);
+    }
+
+    private static void ShutdownDriver()
+    {
+        try { NvApi.Unload(); } catch { }
+        try { FanApi.Shutdown(); } catch { }
     }
 
     private void RestoreTemporaryChanges()

@@ -2,7 +2,7 @@ using NvTune;
 
 if (args is ["--version"])
 {
-    Console.WriteLine($"NvTune {Product.Version}");
+    Console.WriteLine($"NvTune {Product.Version} ({Persistence.Edition})");
     return 0;
 }
 
@@ -16,8 +16,29 @@ if (args is ["--verify-package"])
     preview.DrawToBitmap(bitmap, preview.ClientRectangle);
     Console.WriteLine($"NvTune {Product.Version}");
     Console.WriteLine($"Deployment: {(Persistence.IsSingleFile ? "single-file" : "multi-file")}");
+    Console.WriteLine($"Edition: {Persistence.Edition}");
+    Console.WriteLine($"Data directory: {Persistence.ActiveDataDir}");
     Console.WriteLine("Package check passed. No GPU APIs called.");
     return 0;
+}
+
+if (args is ["--stop-background"])
+{
+    try
+    {
+        using var windowLease = GlobalControlLease.TryAcquire(GlobalControlLease.GuiName,
+            Persistence.LegacyLockPath("gui-instance.lock"))
+            ?? throw new CliError("请先关闭 NvTune 窗口，再停止后台。");
+        DaemonControl.Stop();
+        Console.WriteLine("NvTune background stopped. Saved settings and logon task are unchanged.");
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        MessageBox.Show(ex.Message, "停止 NvTune 后台失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        return 1;
+    }
 }
 
 if (args.Contains("--daemon"))

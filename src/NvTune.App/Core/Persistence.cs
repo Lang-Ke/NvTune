@@ -3,18 +3,29 @@ using System.Globalization;
 namespace NvTune;
 
 /// <summary>
-/// Where the app keeps itself and its state. The GUI may be started from anywhere (a zip folder,
-/// the desktop, a USB stick), but everything that has to survive a reboot lives in one stable
-/// place: %ProgramFiles%\NvTune. The logon task always points there, so moving or deleting the
-/// folder the user unzipped can no longer break the re-apply. Program Files is admin-only writable,
-/// which is also what lets the elevated logon task trust the files it runs.
+/// Installed and portable builds use distinct data locations, selected at build time. Runtime
+/// arguments or executable renaming cannot change which configuration the daemon consumes.
 /// </summary>
 internal static class Persistence
 {
-    public const string FolderName = "NvTune";
+#if PORTABLE
+    public static bool IsPortable => true;
+#else
+    public static bool IsPortable => false;
+#endif
+    public static string Edition => IsPortable ? "portable" : "installed";
+    internal static string LegacyInstallDir
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "NvTune");
+    internal static string LegacyDataDir => Path.Combine(LegacyInstallDir, "data");
+    internal static string LegacyExecutablePath => Path.Combine(LegacyInstallDir, "NvTuneApp.exe");
+    internal static string LegacyLockPath(string name) => Path.Combine(LegacyDataDir, name);
+    internal static string PortableDataDir => PortableData.DataDirectory(Product.ExecutablePath());
+    internal static string ActiveDataDir => IsPortable ? PortableDataDir : LegacyDataDir;
+    public static string InstallDir() => LegacyInstallDir;
+    public static string InstallExePath() => LegacyExecutablePath;
 
-    /// <summary>The folder this process was started from (the unzipped folder during a first run).</summary>
-    public static string SourceDir() => AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+    public static bool RunningInstalledCopy()
+        => string.Equals(Path.GetFullPath(Product.ExecutablePath()), InstallExePath(), StringComparison.OrdinalIgnoreCase);
 
     // A bundled managed assembly has no separate location. This is only a layout check;
     // executable and installation paths continue to use ProcessPath and BaseDirectory.
@@ -22,20 +33,25 @@ internal static class Persistence
     internal static bool IsSingleFile => typeof(Persistence).Assembly.Location.Length == 0;
 #pragma warning restore IL3000
 
-    public static string InstallDir()
-        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), FolderName);
-
-    public static string InstallExePath() => Path.Combine(InstallDir(), "NvTuneApp.exe");
-
-    public static bool RunningInstalledCopy()
-        => string.Equals(Normalize(Environment.ProcessPath), Normalize(InstallExePath()),
-            StringComparison.OrdinalIgnoreCase);
-
     public static string DataDir()
     {
-        string dir = Path.Combine(InstallDir(), "data");
+        string dir = ActiveDataDir;
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    internal static void InitializePortableData()
+    {
+        if (!IsPortable) return;
+        try
+        {
+            int imported = PortableData.Initialize(PortableDataDir, LegacyDataDir);
+            if (imported > 0) Diag.Log($"已从旧安装目录导入 {imported} 个配置文件。");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new CliError($"无法准备便携配置目录 {PortableDataDir}。请将程序放到可写的文件夹后重试。{ex.Message}");
+        }
     }
 
     public static string DataFilePath(string stem, int gpuIndex)
@@ -43,7 +59,7 @@ internal static class Persistence
 
     public static IReadOnlyList<int> StoredGpuIndexes(string stem)
     {
-        string dir = Path.Combine(InstallDir(), "data");
+        string dir = ActiveDataDir;
         if (!Directory.Exists(dir))
         {
             return Array.Empty<int>();
@@ -85,35 +101,17 @@ internal static class Persistence
             : null;
     }
 
-    /// <summary>
-    /// Copies the running program into the stable install folder. Returns the folder it installed
-    /// into, or null when this process already is that copy. Cheap enough to call before every
-    /// save: an already-installed run does no I/O beyond the path comparison.
-    /// </summary>
     public static string? EnsureInstalled()
     {
-        if (RunningInstalledCopy())
-        {
-            return null;
-        }
-
-        string source = SourceDir();
+        if (IsPortable || RunningInstalledCopy()) return null;
         string target = InstallDir();
-        // The GUI holds HardwareControlLease and has cooperatively stopped the daemon.
-        // Do not kill other windows or interrupt an in-flight hardware write during installation.
-        ProgramInstallation.Install(source, target, IsSingleFile, RemoveMarkOfTheWeb, Diag.Log);
-
+        ProgramInstallation.Install(AppContext.BaseDirectory, target, IsSingleFile, RemoveMarkOfTheWeb, Diag.Log);
         Diag.Log($"已安装到 {target}");
         return target;
     }
 
-    /// <summary>Removes the download mark from a copied file: File.Copy carries alternate data
-    /// streams along, and an installed copy that still looks downloaded re-trips SmartScreen.</summary>
     private static void RemoveMarkOfTheWeb(string path)
     {
         try { File.Delete(path + ":Zone.Identifier"); } catch { }
     }
-
-    private static string Normalize(string? path)
-        => string.IsNullOrEmpty(path) ? string.Empty : Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
 }

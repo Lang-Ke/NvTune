@@ -12,6 +12,11 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args is ["--render-ui", var renderDir]) return UiChecks.Render(renderDir);
+        if (args is ["--portable-task-probe", var markerPath])
+        {
+            File.WriteAllText(markerPath, "probe started:" + Environment.ProcessId);
+            return 0;
+        }
         if (args is ["--fan-diagnostics"])
         {
             // Read-only driver queries, explicitly separate from simulated regression checks.
@@ -28,6 +33,14 @@ internal static class Program
             }
             finally { FanApi.Shutdown(); }
             return 0;
+        }
+        if (args is ["--hold-global-lease", var leaseName])
+        {
+            using var lease = GlobalControlLease.TryAcquire(leaseName);
+            Console.WriteLine(lease is null ? "failed" : "ready");
+            Console.Out.Flush();
+            Console.ReadLine();
+            return lease is null ? 1 : 0;
         }
         if (args is ["--hold-lease", var leasePath])
         {
@@ -467,6 +480,7 @@ internal static class Program
                 Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.dll")) == "old runtime file");
             });
         });
+        PortableChecks.Register(Run, Check, WithTemp);
         Run("A crashed owner releases control to the next process", () =>
         {
             WithTemp(dir =>
@@ -524,13 +538,38 @@ internal static class Program
     {
         string dir = Path.Combine(Path.GetTempPath(), $"nvtune-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
+        Exception? testFailure = null;
         try { test(dir); }
+        catch (Exception ex) { testFailure = ex; throw; }
         finally
         {
-            string target = Path.GetFullPath(dir);
-            string prefix = Path.Combine(Path.GetFullPath(Path.GetTempPath()), "nvtune-tests-");
-            if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new Exception("Invalid cleanup target");
-            Directory.Delete(target, true);
+            try
+            {
+                string target = Path.GetFullPath(dir);
+                string prefix = Path.Combine(Path.GetFullPath(Path.GetTempPath()), "nvtune-tests-");
+                if (!target.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new Exception("Invalid cleanup target");
+                // A signaled child process can briefly retain Windows image-file
+                // locks during teardown. Retry only cleanup sharing/access errors;
+                // a persistent lock remains a test failure after five seconds.
+                var cleanupTime = Stopwatch.StartNew();
+                while (true)
+                {
+                    try
+                    {
+                        if (Directory.Exists(target)) Directory.Delete(target, true);
+                        break;
+                    }
+                    catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException)
+                        && cleanupTime.Elapsed < TimeSpan.FromSeconds(5))
+                    {
+                        Thread.Sleep(100);
+                    }
+                }
+            }
+            catch (Exception cleanupFailure) when (testFailure is not null)
+            {
+                throw new AggregateException("Test and temporary-directory cleanup both failed.", testFailure, cleanupFailure);
+            }
         }
     }
 

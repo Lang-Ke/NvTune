@@ -1,37 +1,44 @@
-using System.Diagnostics;
 using System.Security;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Xml.Linq;
 
 namespace NvTune;
 
 /// <summary>
-/// One logon task, registered from XML, that runs the installed copy with <c>--daemon</c>: it
+/// One logon task, registered from XML, that runs the selected edition with <c>--daemon</c>: it
 /// re-applies every saved undervolt and fan setting after a reboot. A single task keeps the two
-/// settings in a defined order (undervolt first, then fans) instead of racing two processes, and
-/// because it targets the copy in Program Files, deleting or moving the unzipped folder no longer
-/// breaks it. XML is used rather than <c>/TR</c> so the quoted path, the arguments and an unlimited
-/// run time for a fan curve are all expressible.
+/// settings in a defined order (undervolt first, then fans) instead of racing two processes.
+/// Installed builds target Program Files; saving a portable build refreshes its path and digest.
+/// XML is used rather than
+/// <c>/TR</c> so paths, arguments and an unlimited run time for a fan curve are all expressible.
 /// </summary>
 internal static class Scheduler
 {
     public const string TaskName = "NvTuneDaemon";
+    private const string DaemonArguments = "--daemon --silent";
+    private static string PowerShellPath => Path.Combine(Environment.SystemDirectory,
+        "WindowsPowerShell", "v1.0", "powershell.exe");
 
     /// <summary>Registers (or refreshes) the task. Throws when Task Scheduler refuses, and verifies
     /// the registration afterwards: the caller must never claim "survives reboot" on a task that
     /// isn't there.</summary>
     public static void Register()
     {
-        string exe = Persistence.InstallExePath();
+        string exe = Persistence.IsPortable ? Product.ExecutablePath() : Persistence.InstallExePath();
         if (!File.Exists(exe))
         {
-            throw new CliError($"安装目录中找不到 {exe}，无法注册开机任务。请先点击“应用”完成安装。");
+            throw new CliError($"找不到登录任务所需程序 {exe}，请重新保存设置后重试。");
         }
 
         string xmlPath = Path.Combine(Path.GetTempPath(), $"nvtune-{Guid.NewGuid():N}.xml");
         try
         {
-            File.WriteAllText(xmlPath, BuildXml(exe, "--daemon --silent"),
+            string xml = Persistence.IsPortable
+                ? BuildXml(exe, DaemonArguments, CurrentUserSid(), FileHash(exe))
+                : BuildInstalledXml(exe, DaemonArguments, CurrentUserSid());
+            File.WriteAllText(xmlPath, xml,
                 new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
             var (code, _, stderr) = Run("schtasks.exe", "/Create", "/F", "/TN", TaskName, "/XML", xmlPath);
             if (code != 0)
@@ -54,27 +61,35 @@ internal static class Scheduler
 
     public static bool Exists()
     {
-        var (code, _, _) = Run("schtasks.exe", "/Query", "/TN", TaskName);
-        return code == 0;
+        try
+        {
+            string? xml = ReadTaskXml();
+            if (xml is null) return false;
+            string exe = Persistence.IsPortable ? Product.ExecutablePath() : Persistence.InstallExePath();
+            return Persistence.IsPortable
+                ? MatchesCurrentExecutable(xml, exe, FileHash(exe))
+                : MatchesInstalledExecutable(xml, exe);
+        }
+        catch (Exception ex)
+        {
+            Diag.Log("核对登录任务失败: " + ex.Message);
+            return false;
+        }
     }
 
-    /// <summary>The task's command line, for the status panel; null when it can't be read.</summary>
+    /// <summary>The registered target path, including an older portable location.</summary>
     public static string? Describe()
     {
-        var (code, stdout, _) = Run("schtasks.exe", "/Query", "/TN", TaskName, "/FO", "LIST", "/V");
-        if (code != 0) return null;
-        foreach (string line in stdout.Split('\n'))
+        try
         {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith("要运行的任务", StringComparison.Ordinal)
-                || trimmed.StartsWith("Task To Run", StringComparison.OrdinalIgnoreCase))
-            {
-                int colon = trimmed.IndexOf(':');
-                if (colon >= 0) return trimmed[(colon + 1)..].Trim();
-            }
+            string? xml = ReadTaskXml();
+            if (xml is null) return null;
+            var task = XDocument.Parse(xml);
+            XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+            return (string?)task.Root?.Element(ns + "RegistrationInfo")?.Element(ns + "Source")
+                ?? (string?)task.Root?.Element(ns + "Actions")?.Element(ns + "Exec")?.Element(ns + "Command");
         }
-
-        return null;
+        catch { return null; }
     }
 
     public static void RemoveLegacyTasks()
@@ -88,7 +103,8 @@ internal static class Scheduler
 
     public static void Remove()
     {
-        if (!Exists()) return;
+        var (queryCode, _, _) = Run("schtasks.exe", "/Query", "/TN", TaskName);
+        if (queryCode != 0) return;
         var (code, _, stderr) = Run("schtasks.exe", "/Delete", "/TN", TaskName, "/F");
         if (code != 0)
         {
@@ -98,29 +114,38 @@ internal static class Scheduler
         Diag.Log("已删除登录任务 " + TaskName);
     }
 
-    private static string BuildXml(string exe, string arguments)
+    internal static string BuildXml(string exe, string arguments, string userId, string sha256)
+        => BuildTaskXml(exe, PowerShellPath, BuildLauncherArguments(exe, arguments, sha256), userId);
+
+    internal static string BuildInstalledXml(string exe, string arguments, string userId)
+        => BuildTaskXml(exe, Path.GetFullPath(exe), arguments, userId);
+
+    private static string BuildTaskXml(string exe, string launcher, string arguments, string userId)
     {
+        exe = Path.GetFullPath(exe);
         string exeXml = SecurityElement.Escape(exe)!;
+        string launcherXml = SecurityElement.Escape(launcher)!;
         string argsXml = SecurityElement.Escape(arguments)!;
-        string userId = SecurityElement.Escape(CurrentUserSid())!;
-        string workDir = SecurityElement.Escape(Persistence.InstallDir())!;
+        string userXml = SecurityElement.Escape(userId)!;
+        string workDir = SecurityElement.Escape(Path.GetDirectoryName(Path.GetFullPath(exe))!)!;
 
         return $"""
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>NvTune: 登录后重新应用显卡降压与风扇设置</Description>
+    <Source>{exeXml}</Source>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
       <Delay>PT20S</Delay>
-      <UserId>{userId}</UserId>
+      <UserId>{userXml}</UserId>
     </LogonTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
-      <UserId>{userId}</UserId>
+      <UserId>{userXml}</UserId>
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>HighestAvailable</RunLevel>
     </Principal>
@@ -147,13 +172,112 @@ internal static class Scheduler
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>{exeXml}</Command>
+      <Command>{launcherXml}</Command>
       <Arguments>{argsXml}</Arguments>
       <WorkingDirectory>{workDir}</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>
 """;
+    }
+
+    internal static bool MatchesInstalledExecutable(string xml, string exe)
+    {
+        try
+        {
+            exe = Path.GetFullPath(exe);
+            var task = XDocument.Parse(xml);
+            XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+            var actions = task.Root?.Element(ns + "Actions");
+            if (actions is null || actions.Elements().Count() != 1) return false;
+            var action = actions.Element(ns + "Exec");
+            return action is not null
+                && string.Equals((string?)action.Element(ns + "Command"), exe, StringComparison.OrdinalIgnoreCase)
+                && (string?)action.Element(ns + "Arguments") == DaemonArguments
+                && string.Equals((string?)action.Element(ns + "WorkingDirectory"), Path.GetDirectoryName(exe), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Only a task bound to this exact executable and digest counts as enabled.</summary>
+    internal static bool MatchesCurrentExecutable(string xml, string exe, string sha256)
+    {
+        try
+        {
+            exe = Path.GetFullPath(exe);
+            var task = XDocument.Parse(xml);
+            XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+            var actions = task.Root?.Element(ns + "Actions");
+            if (actions is null || actions.Elements().Count() != 1) return false;
+            var action = actions.Element(ns + "Exec");
+            return action is not null
+                && string.Equals((string?)action.Element(ns + "Command"), PowerShellPath, StringComparison.OrdinalIgnoreCase)
+                && (string?)action.Element(ns + "Arguments") == BuildLauncherArguments(exe, DaemonArguments, sha256)
+                && string.Equals((string?)action.Element(ns + "WorkingDirectory"), Path.GetDirectoryName(exe), StringComparison.OrdinalIgnoreCase)
+                && string.Equals((string?)task.Root?.Element(ns + "RegistrationInfo")?.Element(ns + "Source"), exe, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    internal static string BuildLauncherArguments(string exe, string arguments, string sha256)
+    {
+        string script = BuildLauncherScript(exe, arguments, sha256);
+        return "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "
+            + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+    }
+
+    /// <summary>The protected task stores the script and expected hash; portable data is never executed.</summary>
+    internal static string BuildLauncherScript(string exe, string arguments, string sha256)
+    {
+        if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit))
+            throw new ArgumentException("A complete SHA-256 digest is required.", nameof(sha256));
+        exe = Path.GetFullPath(exe);
+        static string Literal(string value) => "'" + value.Replace("'", "''") + "'";
+        return $$"""
+$ErrorActionPreference = 'Stop'
+$exe = {{Literal(exe)}}
+$arguments = {{Literal(arguments)}}
+$workingDirectory = {{Literal(Path.GetDirectoryName(exe)!)}}
+$expected = '{{sha256.ToUpperInvariant()}}'
+$stream = $null
+$hasher = $null
+try {
+    $stream = [IO.File]::Open($exe, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    $actual = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '')
+    if (-not [String]::Equals($actual, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'NvTune executable changed. Save the settings again to update the logon task.'
+    }
+    $started = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
+    if ($null -eq $started) { throw 'NvTune background process did not start.' }
+    $started.Dispose()
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+} finally {
+    if ($null -ne $hasher) { $hasher.Dispose() }
+    if ($null -ne $stream) { $stream.Dispose() }
+}
+exit 0
+""";
+    }
+
+    private static string FileHash(string exe)
+    {
+        using var stream = File.OpenRead(exe);
+        return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    private static string? ReadTaskXml()
+    {
+        var (code, stdout, _) = Run("schtasks.exe", "/Query", "/TN", TaskName, "/XML");
+        return code == 0 ? stdout : null;
     }
 
     private static string CurrentUserSid()

@@ -12,12 +12,16 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>NvTuneApp</AssemblyName>
     <RootNamespace>NvTune</RootNamespace>
-    <Version>1.0.13</Version>
+    <Version>1.0.14</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Portable)' == 'true'">
+    <DefineConstants>$(DefineConstants);PORTABLE</DefineConstants>
   </PropertyGroup>
 
 </Project>

@@ -9,22 +9,41 @@ $destination = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 } else {
     [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
 }
-# Each run builds into a fresh directory, so a successful check cannot depend on
-# stale DLLs, runtime configuration, or a separate launcher.
+# Each edition gets fresh build, publish, and working directories, so checks
+# cannot depend on artifacts from another edition or a previous release.
 $staging = Join-Path $repoRoot ('artifacts/package-' + [Guid]::NewGuid().ToString('N'))
-$appDirectory = Join-Path $staging 'app'
-$checkDirectory = Join-Path $staging 'check-working-directory'
-New-Item -ItemType Directory -Path $checkDirectory -Force | Out-Null
+$editions = @(
+    @{ Name = 'installed'; Portable = 'false'; FileName = 'NvTuneApp.exe' },
+    @{ Name = 'portable'; Portable = 'true'; FileName = 'NvTunePortable.exe' }
+)
+$expectedNames = @($editions | ForEach-Object { $_.FileName })
+
+function Assert-ReleaseContents {
+    if (!(Test-Path -LiteralPath $destination)) { return }
+    $unexpected = @(Get-ChildItem -LiteralPath $destination -Force | Where-Object {
+        $_.PSIsContainer -or $_.Name -cnotin $expectedNames
+    })
+    if ($unexpected.Count -ne 0) {
+        throw "Release directory contains unexpected entries: $($unexpected.Name -join ', '). Use an empty output directory."
+    }
+}
+
+function Assert-SingleExecutable([string]$Directory, [string]$FileName) {
+    $entries = @(Get-ChildItem -LiteralPath $Directory -Force)
+    if ($entries.Count -ne 1 -or $entries[0].PSIsContainer -or $entries[0].Name -cne $FileName) {
+        throw "Expected exactly one published $FileName, without sidecar files or data directories, in $Directory."
+    }
+}
 
 function Invoke-DotNet([string[]]$Arguments) {
     & dotnet @Arguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet failed with exit code $LASTEXITCODE." }
 }
 
-function Invoke-AppCheck([string]$Executable, [string]$Argument) {
+function Invoke-AppCheck([string]$Executable, [string]$Argument, [string]$WorkingDirectory) {
     $start = [Diagnostics.ProcessStartInfo]::new($Executable)
     $start.Arguments = $Argument
-    $start.WorkingDirectory = $checkDirectory
+    $start.WorkingDirectory = $WorkingDirectory
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -51,31 +70,59 @@ function Invoke-AppCheck([string]$Executable, [string]$Argument) {
 
 Push-Location $repoRoot
 try {
-    Invoke-DotNet -Arguments @('publish', 'src/NvTune.App/NvTune.csproj', '-c', 'Release',
-        '-p:PublishProfile=WinX64', '-o', $appDirectory)
-    $published = @(Get-ChildItem -LiteralPath $appDirectory -File)
-    if ($published.Count -ne 1 -or $published[0].Name -ne 'NvTuneApp.exe' -or
-        @(Get-ChildItem -LiteralPath $appDirectory -Directory).Count -ne 0) {
-        throw 'Expected exactly one published NvTuneApp.exe, without sidecar files.'
+    Assert-ReleaseContents
+    foreach ($edition in $editions) {
+        $editionDirectory = Join-Path $staging $edition.Name
+        $appDirectory = Join-Path $editionDirectory 'app'
+        $checkDirectory = Join-Path $editionDirectory 'check-working-directory'
+        $buildDirectory = Join-Path $editionDirectory 'build'
+        New-Item -ItemType Directory -Path $checkDirectory -Force | Out-Null
+        Invoke-DotNet -Arguments @('publish', 'src/NvTune.App/NvTune.csproj', '-c', 'Release',
+            '-p:PublishProfile=WinX64', "-p:Portable=$($edition.Portable)",
+            '--artifacts-path', $buildDirectory, '-o', $appDirectory)
+        Assert-SingleExecutable -Directory $appDirectory -FileName 'NvTuneApp.exe'
+        if ($edition.FileName -cne 'NvTuneApp.exe') {
+            Rename-Item -LiteralPath (Join-Path $appDirectory 'NvTuneApp.exe') -NewName $edition.FileName
+        }
+
+        # Package verification renders the UI without GPU, installation, data
+        # initialization, or task registration. Verify the final executable name.
+        $executable = Join-Path $appDirectory $edition.FileName
+        $report = Invoke-AppCheck -Executable $executable -Argument '--verify-package' -WorkingDirectory $checkDirectory
+        $expectedDataDirectory = if ($edition.Portable -ceq 'true') {
+            Join-Path $appDirectory 'data'
+        } else {
+            Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'NvTune/data'
+        }
+        $lines = $report -split '\r?\n'
+        foreach ($expectedLine in @('Deployment: single-file', "Edition: $($edition.Name)",
+            "Data directory: $expectedDataDirectory", 'Package check passed. No GPU APIs called.')) {
+            if ($lines -cnotcontains $expectedLine) {
+                throw "Package verification is missing '$expectedLine'. $report"
+            }
+        }
+        Assert-SingleExecutable -Directory $appDirectory -FileName $edition.FileName
+        if (@(Get-ChildItem -LiteralPath $checkDirectory -Force).Count -ne 0) {
+            throw "Package verification created files in its working directory: $checkDirectory."
+        }
+        Write-Output $report
+        $edition.Executable = $executable
     }
 
-    # These modes never load GPU APIs, install files, change saved configurations,
-    # or register a Windows task. Run from an empty working directory as well as
-    # a fresh publish directory to catch dependencies on neighboring files.
-    $executable = Join-Path $appDirectory 'NvTuneApp.exe'
-    $report = Invoke-AppCheck -Executable $executable -Argument '--verify-package'
-    if (!$report.Contains('Deployment: single-file') -or
-        !$report.Contains('Package check passed. No GPU APIs called.')) {
-        throw "Single-file verification failed. $report"
-    }
-    Write-Output $report
-
+    # Only update the release directory once both editions have passed.
+    Assert-ReleaseContents
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
-    $executablePath = Join-Path $destination 'NvTuneApp.exe'
-    Copy-Item -LiteralPath $executable -Destination $executablePath -Force
-    $digest = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Get-Item -LiteralPath $executablePath | Select-Object Name, Length, FullName
-    Write-Output "SHA256: $digest"
+    foreach ($edition in $editions) {
+        $executablePath = Join-Path $destination $edition.FileName
+        Copy-Item -LiteralPath $edition.Executable -Destination $executablePath -Force
+        $digest = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        Get-Item -LiteralPath $executablePath | Select-Object Name, Length, FullName
+        Write-Output "$($edition.FileName) SHA256: $digest"
+    }
+    Assert-ReleaseContents
+    if (@(Get-ChildItem -LiteralPath $destination -Force).Count -ne 2) {
+        throw 'Expected exactly NvTuneApp.exe and NvTunePortable.exe in the release directory.'
+    }
 } finally {
     Pop-Location
 }

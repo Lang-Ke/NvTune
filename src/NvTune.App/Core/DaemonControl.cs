@@ -3,19 +3,22 @@ using System.Diagnostics;
 namespace NvTune;
 
 /// <summary>
-/// Starts, stops and detects the background task. The daemon records its PID in the install data
-/// folder so the GUI can stop exactly that process (never a name-based sweep), and a named mutex
-/// guarantees a single instance even if both the logon task and the GUI try to start one.
+/// Portable backgrounds share one global owner and a cooperative stop event across directories.
+/// PID files remain local; only known current/legacy executable paths are used for PID migration.
 /// </summary>
 internal static class DaemonControl
 {
     internal const string StopEventName = @"Global\NvTuneDaemonStop";
 
-    private static string PidPath => Path.Combine(Persistence.DataDir(), "daemon.pid");
+    private static string PidPath => Path.Combine(Persistence.ActiveDataDir, "daemon.pid");
 
     internal static void WritePid()
     {
-        try { File.WriteAllText(PidPath, Environment.ProcessId.ToString()); }
+        try
+        {
+            Directory.CreateDirectory(Persistence.ActiveDataDir);
+            File.WriteAllText(PidPath, Environment.ProcessId.ToString());
+        }
         catch (Exception ex) { Diag.Log("写入后台任务 PID 失败: " + ex.Message); }
     }
 
@@ -40,41 +43,14 @@ internal static class DaemonControl
         }
     }
 
-    /// <summary>True when the recorded PID is alive and really is this app.</summary>
-    public static bool IsRunning()
-    {
-        if (ReadPid() is not { } pid) return false;
-        try
-        {
-            using var proc = Process.GetProcessById(pid);
-            return !proc.HasExited && IsOurs(proc);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    public static bool IsRunning() => GlobalControlLease.IsHeld(GlobalControlLease.DaemonName);
 
-    private static bool IsOurs(Process proc)
-        => string.Equals(proc.MainModule?.FileName, Persistence.InstallExePath(), StringComparison.OrdinalIgnoreCase)
-            || string.Equals(proc.MainModule?.FileName, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Starts the installed copy with <c>--daemon</c>. Prefers the installed path: the daemon must
-    /// keep running after the window closes, and starting it from a folder the user may delete would
-    /// make it fail on the next logon.
-    /// </summary>
+    /// <summary>Starts the current build so recovery uses the same edition and saved settings.</summary>
     public static void Start(bool recoverFans = false)
     {
         if (IsRunning()) return;
 
-        // A GUI standby must run the exact same build, even before the user saves/updates
-        // an older installed copy. An older daemon does not understand the ownership lease.
-        string exe = recoverFans
-            ? Environment.ProcessPath ?? throw new CliError("无法确定程序路径。")
-            : File.Exists(Persistence.InstallExePath())
-            ? Persistence.InstallExePath()
-            : Environment.ProcessPath ?? throw new CliError("无法确定程序路径。");
+        string exe = Product.ExecutablePath();
 
         var psi = new ProcessStartInfo(exe)
         {
@@ -90,20 +66,54 @@ internal static class DaemonControl
 
     public static void Stop()
     {
-        try { DaemonStop.Stop(PidPath, RecordedProcess.Open, Diag.Log); }
+        try
+        {
+            foreach (var target in StopTargets(Persistence.IsPortable, Product.ExecutablePath(),
+                Persistence.LegacyExecutablePath, Persistence.ActiveDataDir, Persistence.LegacyDataDir))
+                DaemonStop.Stop(target.PidPath, pid => RecordedProcess.Open(pid, target.ExecutablePaths), Diag.Log);
+            // A portable background in another directory has no local PID here. Request its
+            // cooperative stop and wait for the global owner before changing configuration.
+            DaemonStop.StopGlobal(IsRunning, RequestGlobalStop, Thread.Sleep);
+        }
         catch (CliError) { throw; }
         catch (Exception ex) { throw new CliError("停止后台任务失败: " + ex.Message); }
     }
 
-    private sealed class RecordedProcess(Process process) : IRecordedDaemon
+    internal sealed record StopTarget(string PidPath, IReadOnlyList<string> ExecutablePaths);
+
+    /// <summary>Builds exact process-path checks without reading the user's installation. An
+    /// installed build may run from Downloads while its existing daemon lives in Program Files;
+    /// both known paths must be checked together before a PID can be treated as stale.</summary>
+    internal static IReadOnlyList<StopTarget> StopTargets(bool portable, string currentExecutable,
+        string installedExecutable, string currentDataDirectory, string installedDataDirectory)
     {
-        public static IRecordedDaemon? Open(int pid)
+        string currentExe = Path.GetFullPath(currentExecutable);
+        string installedExe = Path.GetFullPath(installedExecutable);
+        string localPid = Path.Combine(Path.GetFullPath(currentDataDirectory), "daemon.pid");
+        string installedPid = Path.Combine(Path.GetFullPath(installedDataDirectory), "daemon.pid");
+        bool sharedRecord = string.Equals(localPid, installedPid, StringComparison.OrdinalIgnoreCase);
+        string[] localExecutables = (!portable || sharedRecord ? new[] { currentExe, installedExe } : new[] { currentExe })
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var local = new StopTarget(localPid, localExecutables);
+        return sharedRecord ? new[] { local } : new[] { local, new StopTarget(installedPid, new[] { installedExe }) };
+    }
+
+    private static void RequestGlobalStop()
+    {
+        if (!EventWaitHandle.TryOpenExisting(StopEventName, out var stopEvent)) return;
+        using (stopEvent) stopEvent.Set();
+    }
+
+    private sealed class RecordedProcess(Process process, IReadOnlyList<string> expectedExecutables) : IRecordedDaemon
+    {
+        public static IRecordedDaemon? Open(int pid, IReadOnlyList<string> expectedExecutables)
         {
-            try { return new RecordedProcess(Process.GetProcessById(pid)); }
+            try { return new RecordedProcess(Process.GetProcessById(pid), expectedExecutables); }
             catch (ArgumentException) { return null; }
         }
 
-        public bool IsOurs => process.MainWindowHandle == IntPtr.Zero && DaemonControl.IsOurs(process);
+        public bool IsOurs => process.MainWindowHandle == IntPtr.Zero
+            && expectedExecutables.Contains(process.MainModule?.FileName, StringComparer.OrdinalIgnoreCase);
         public bool HasExited => process.HasExited;
         public bool IsVerifiedLegacyDaemon
         {

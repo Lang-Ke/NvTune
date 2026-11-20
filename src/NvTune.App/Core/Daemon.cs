@@ -27,7 +27,8 @@ internal static class Daemon
 
     public static async Task<int> Run(CancellationToken token, bool recoverFans = false)
     {
-        using var single = HardwareControlLease.TryAcquire(Path.Combine(Persistence.DataDir(), "daemon-instance.lock"));
+        using var single = GlobalControlLease.TryAcquire(GlobalControlLease.DaemonName,
+            Persistence.LegacyLockPath("daemon-instance.lock"));
         if (single is null)
         {
             Diag.Log("后台任务已在运行，本次启动退出。");
@@ -43,15 +44,16 @@ internal static class Daemon
         }, null, Timeout.Infinite, true);
         token = linked.Token;
         bool failed = false;
-        FileStream? hardwareOwner = null;
+        IDisposable? hardwareOwner = null;
         DaemonControl.WritePid();
         Diag.Log("后台任务启动。");
 
         try
         {
             // A standby daemon waits while the GUI owns the hardware. Windows releases the
-            // GUI's file lock even on a crash, so saved curves regain a controller in that case too.
-            while ((hardwareOwner = HardwareControlLease.TryAcquire()) is null)
+            // GUI's global control lease even on a crash, so saved curves regain a controller too.
+            while ((hardwareOwner = GlobalControlLease.TryAcquire(GlobalControlLease.HardwareName,
+                Persistence.LegacyLockPath("hardware-control.lock"))) is null)
             {
                 if (token.IsCancellationRequested) return 0;
                 await Delay(500, token).ConfigureAwait(false);

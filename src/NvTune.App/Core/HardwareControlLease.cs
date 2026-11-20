@@ -1,12 +1,11 @@
 namespace NvTune;
 
-/// <summary>A process-wide hardware owner, automatically released by Windows on a crash.
-/// File sharing locks also work across Windows sessions and do not depend on async thread affinity.</summary>
+/// <summary>Legacy file-lock compatibility checks. Production control also holds the global
+/// mutex through <see cref="GlobalControlLease"/> so editions and portable folders share one owner.</summary>
 internal static class HardwareControlLease
 {
-    public static FileStream? TryAcquire(string? path = null)
+    public static FileStream? TryAcquire(string path)
     {
-        path ??= Path.Combine(Persistence.DataDir(), "hardware-control.lock");
         try { return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
         catch (IOException ex) when ((ex.HResult & 0xFFFF) is 32 or 33) { return null; }
     }
