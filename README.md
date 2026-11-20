@@ -139,4 +139,4 @@ NvTune/
 
 [MIT](LICENSE) — 基于 [vuplea/simple-nvidia-undervolt](https://github.com/vuplea/simple-nvidia-undervolt) 派生。
 
-独立 EXE 内嵌完整许可证与版权声明，可通过主界面“关于”、F1 或 `--license` 查看。
+独立 EXE 内嵌完整许可证与版权声明，可通过 `NvTuneApp.exe --license` 查看。

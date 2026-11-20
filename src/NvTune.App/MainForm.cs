@@ -74,7 +74,7 @@ internal sealed partial class MainForm : Form
     {
         _preview = preview;
         SuspendLayout();
-        Text = "NvTune 1.0.8 · NVIDIA 降压与风扇";
+        Text = "NvTune 1.0.9 · NVIDIA 降压与风扇";
         Font = Theme.BodyFont();
         BackColor = Theme.Canvas;
         AutoScaleDimensions = new SizeF(96, 96);
@@ -84,7 +84,6 @@ internal sealed partial class MainForm : Form
         ClientSize = new Size(D(960), D(760));
         MinimumSize = new Size(D(640), D(480));
         StartPosition = FormStartPosition.CenterScreen;
-        KeyPreview = true;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
         BuildLayout();
         _fanMode.Items.AddRange(new object[] { "自动", "固定转速", "温度曲线" });
@@ -749,24 +748,6 @@ internal sealed partial class MainForm : Form
     {
         _statusLabel.Text = message;
         _statusLabel.ForeColor = color;
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.F1)
-        {
-            e.Handled = e.SuppressKeyPress = true;
-            LicenseInfo.Show(this);
-            return;
-        }
-        if (e.Control && e.KeyCode == Keys.S)
-        {
-            e.Handled = e.SuppressKeyPress = true;
-            SaveAllSettings();
-            return;
-        }
-
-        base.OnKeyDown(e);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

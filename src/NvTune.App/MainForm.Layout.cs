@@ -141,13 +141,12 @@ internal sealed partial class MainForm
     private Control BuildFanCard()
     {
         var card = Theme.Card("02   风扇曲线", out var body);
-        var top = Theme.Table(6, 1);
+        var top = Theme.Table(5, 1);
         top.Dock = DockStyle.Top;
         top.Height = D(44);
         top.ColumnStyles.Clear();
         foreach (int width in new[] { 154, 130, 142, 126 }) top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(width)));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(126)));
         top.RowStyles.Clear(); top.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         top.Controls.Add(Theme.Cell(_fanMode, new Padding(0, 0, D(12), 0)), 0, 0);
         _fanMode.Width = D(142);
@@ -160,7 +159,6 @@ internal sealed partial class MainForm
         top.Controls.Add(fixedHost, 1, 0);
         top.Controls.Add(Theme.Cell(Theme.PrimaryButton("本次应用", (_, _) => ApplyFanSettings()), new Padding(0, 0, D(10), 0)), 2, 0);
         top.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复自动", (_, _) => RestoreFanAuto()), Padding.Empty), 3, 0);
-        top.Controls.Add(Theme.Cell(Theme.SecondaryButton("推荐曲线", (_, _) => _curveEditor.ResetToDefault()), Padding.Empty), 5, 0);
         var hint = new Label
         {
             Dock = DockStyle.Bottom, Height = D(20), Text = "双击添加 / 删除控制点     拖动调整     方向键微调 · Shift ×5",
@@ -193,16 +191,6 @@ internal sealed partial class MainForm
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(142)));
         footer.RowStyles.Clear(); footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         footer.Controls.Add(Theme.Cell(Theme.PrimaryButton("保存并开机应用", (_, _) => SaveAllSettings(), 152), Padding.Empty), 0, 0);
-        var about = new LinkLabel
-        {
-            Text = "Ctrl + S · 关于", LinkArea = new LinkArea(11, 2),
-            ForeColor = Theme.Muted, LinkColor = Theme.Accent, ActiveLinkColor = Theme.Text,
-            VisitedLinkColor = Theme.Accent, Font = Theme.SmallFont(), AutoSize = true,
-            Anchor = AnchorStyles.Left, Margin = new Padding(D(14), 0, 0, 0),
-        };
-        _tips.SetToolTip(about, "Ctrl + S 保存；F1 查看版本与开源许可证");
-        about.LinkClicked += (_, _) => LicenseInfo.Show(this);
-        footer.Controls.Add(about, 1, 0);
         var reset = Theme.SecondaryButton("全部恢复出厂", (_, _) => ClearEverything(), 132);
         reset.ForeColor = Theme.Danger;
         footer.Controls.Add(Theme.Cell(reset, new Padding(D(10), 0, 0, 0)), 2, 0);

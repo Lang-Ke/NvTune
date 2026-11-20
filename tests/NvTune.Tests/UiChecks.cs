@@ -24,6 +24,33 @@ internal static class UiChecks
             check(Contrast(Theme.Muted, Theme.Surface) >= 4.5);
             check(Contrast(Theme.Canvas, Theme.Accent) >= 4.5);
         });
+        run("Rounded buttons completely erase old pixels outside their corners", () =>
+        {
+            var paint = typeof(ModernButton).GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            try
+            {
+                foreach (float scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f })
+                {
+                    Theme.DpiScaleOverride = scale;
+                    using var parent = new Panel { BackColor = Theme.Surface };
+                    using var button = new ModernButton { Size = new Size(Theme.Scaled(112), Theme.Scaled(36)), Text = "恢复自动" };
+                    parent.Controls.Add(button);
+                    using var bitmap = new Bitmap(button.Width, button.Height);
+                    using var graphics = Graphics.FromImage(bitmap);
+                    foreach (var kind in new[] { ButtonKind.Secondary, ButtonKind.Primary })
+                    {
+                        button.Kind = kind;
+                        graphics.Clear(Color.Magenta);
+                        using var args = new PaintEventArgs(graphics, button.ClientRectangle);
+                        paint.Invoke(button, new object[] { args });
+                        foreach (var corner in new[] { Point.Empty, new Point(button.Width - 1, 0),
+                            new Point(0, button.Height - 1), new Point(button.Width - 1, button.Height - 1) })
+                            check(bitmap.GetPixel(corner.X, corner.Y).ToArgb() == parent.BackColor.ToArgb());
+                    }
+                }
+            }
+            finally { Theme.DpiScaleOverride = null; }
+        });
         run("Drawing fonts scale once in pixels at 100 through 300 percent", () =>
         {
             using var plot = new FanCurveEditor();

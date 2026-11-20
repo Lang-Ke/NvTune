@@ -299,9 +299,9 @@ internal sealed class ModernButton : Button
     {
         Graphics g = e.Graphics;
         if (Width < 8 || Height < 8) return;
+        // Clear without antialiasing so old rectangular edges cannot survive in the corners.
+        g.Clear(Parent?.BackColor ?? Theme.Canvas);
         g.SmoothingMode = SmoothingMode.AntiAlias;
-
-        using (var clear = new SolidBrush(Parent?.BackColor ?? Theme.Canvas)) g.FillRectangle(clear, ClientRectangle);
 
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
         Color fore;
