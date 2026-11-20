@@ -125,19 +125,19 @@ internal sealed partial class MainForm
         var grid = Theme.Table(6, 2);
         grid.ColumnStyles.Clear();
         for (int i = 0; i < 3; i++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(144)));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(142)));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, D(126)));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.RowStyles.Clear();
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(24)));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(38)));
-        AddField(grid, 0, "目标调整 · mV", _mvInput);
+        AddField(grid, 0, "目标电压 · mV", _mvInput);
         AddField(grid, 1, "目标频率 · MHz", _mhzInput);
         AddField(grid, 2, "显存偏移 · MHz", _memInput);
         var apply = Theme.PrimaryButton("本次应用", (_, _) => ApplyUndervolt());
         _tips.SetToolTip(apply, "临时应用降压，关闭软件后恢复保存的配置");
-        grid.Controls.Add(Theme.Cell(apply, new Padding(D(12), 0, 0, 0)), 4, 1);
-        grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()), new Padding(D(12), 0, 0, 0)), 5, 1);
+        grid.Controls.Add(Theme.Cell(apply, new Padding(D(12), 0, 0, 0)), 3, 1);
+        grid.Controls.Add(Theme.Cell(Theme.SecondaryButton("恢复默认", (_, _) => ResetUndervolt()), new Padding(D(12), 0, 0, 0)), 4, 1);
         body.Controls.Add(grid);
         return card;
     }
