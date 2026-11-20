@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>An anticipated, user-facing failure: bad arguments, a driver refusal, an environment the
 /// command can't run in. Thrown wherever the code detects a condition it has a message for, and

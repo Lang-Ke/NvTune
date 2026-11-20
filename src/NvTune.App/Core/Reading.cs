@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Result of a single NVAPI read: either a value or the error that prevented it.</summary>
 internal readonly struct Reading<T>

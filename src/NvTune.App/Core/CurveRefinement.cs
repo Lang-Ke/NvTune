@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The post-write refinement of a planned curve write. The driver realizes written clocks by

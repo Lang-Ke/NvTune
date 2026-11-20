@@ -1,12 +1,11 @@
 using System.Reflection;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
-/// <summary>The product name — the executable's base name, and what the install directory, logon task,
-/// relay pipes and message-box captions are named after.</summary>
+/// <summary>Product identity included in diagnostic reports.</summary>
 internal static class Product
 {
-    public const string Name = "simple-nvidia-undervolt";
+    public const string Name = "NvTune";
 
     /// <summary>The running executable's full path — what the elevated relaunch and the installed copy
     /// are made from. Throws when the OS can't report it.</summary>

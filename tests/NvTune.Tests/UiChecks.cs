@@ -1,6 +1,6 @@
 using System.Drawing.Imaging;
 using System.Reflection;
-using SimpleNvidiaUndervolt;
+using NvTune;
 
 internal static class UiChecks
 {

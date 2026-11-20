@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// Which of the enumerated NVIDIA GPUs a command runs against, from <c>--gpu</c>: one index into

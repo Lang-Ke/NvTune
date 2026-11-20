@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 internal interface IRecordedDaemon : IDisposable
 {

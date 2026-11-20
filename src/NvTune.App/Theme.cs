@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>One place for the palette and the shared control styling, so the form and the curve
 /// editor cannot drift apart. Layout is authored at 96 DPI and scaled by WinForms.</summary>

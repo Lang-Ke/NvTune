@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The undervolt values the user last committed for one GPU, kept purely so the panel reopens on

@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// Reset and write of the GPU tuning that MSI Afterburner programs into the driver, plus the curve

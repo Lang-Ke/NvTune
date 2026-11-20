@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// Where the app keeps itself and its state. The GUI may be started from anywhere (a zip folder,

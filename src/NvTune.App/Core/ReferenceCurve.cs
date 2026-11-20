@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The saved stock V/F reference curve tuning plans from, so the same command always produces the

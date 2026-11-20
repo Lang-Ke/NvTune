@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Tiny rotating log beside the app so a background failure can be diagnosed after the
 /// fact. The daemon and the logon task have no console, so this is their only voice.</summary>

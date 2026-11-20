@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The tuning document every persisting run stores for the logon task, which re-applies it with

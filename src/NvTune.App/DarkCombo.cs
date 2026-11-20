@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Drawing.Drawing2D;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Paints both the field and popup with the dark palette, including the arrow.</summary>
 internal sealed class DarkCombo : Control

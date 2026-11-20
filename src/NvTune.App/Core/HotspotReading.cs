@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>A missing hotspot is a separate state, never a zero or a copy of the core sensor.</summary>
 internal sealed record HotspotReading(double? Celsius, string Note, string Details)

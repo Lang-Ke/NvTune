@@ -3,7 +3,7 @@ using System.Security;
 using System.Security.Principal;
 using System.Text;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// One logon task, registered from XML, that runs the installed copy with <c>--daemon</c>: it

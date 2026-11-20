@@ -1,7 +1,7 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Minimal NVML interop for fan control: read/set fan percentage and control policy per
 /// physical GPU. NVML ships with the NVIDIA driver as nvml.dll, so no extra runtime is needed.</summary>

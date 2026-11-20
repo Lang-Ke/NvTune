@@ -1,4 +1,4 @@
-﻿namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>A multi-point fan curve: ordered (temperature °C → fan %) points, interpolated with a
 /// monotonic cubic curve between them. Points below the first hold the first value; points above

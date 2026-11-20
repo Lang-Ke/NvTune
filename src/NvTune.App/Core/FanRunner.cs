@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// NVML fan control, plus the mapping between NVAPI's GPU enumeration (which keys every saved

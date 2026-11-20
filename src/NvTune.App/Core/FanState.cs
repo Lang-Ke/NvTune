@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>The stored fan control state for one GPU: mode (auto/fixed/curve) and the mode's data.
 /// Stored as JSON beside the executable so the daemon and the GUI agree without a database.</summary>

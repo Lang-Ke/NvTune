@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The one process the logon task runs. It applies everything that was saved, in a defined order:

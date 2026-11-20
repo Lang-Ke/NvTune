@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Runs a console helper (schtasks, powershell) hidden and synchronously — the one place the
 /// start/drain/wait boilerplate lives. Output is captured rather than inherited so the helper's chatter

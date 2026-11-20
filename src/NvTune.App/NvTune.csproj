@@ -11,17 +11,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <AssemblyName>NvTuneApp</AssemblyName>
-    <RootNamespace>SimpleNvidiaUndervolt</RootNamespace>
-    <Version>1.0.11</Version>
+    <RootNamespace>NvTune</RootNamespace>
+    <Version>1.0.12</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="../../LICENSE" LogicalName="NvTune.LICENSE" />
-  </ItemGroup>
 
 </Project>

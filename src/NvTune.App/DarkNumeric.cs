@@ -1,5 +1,5 @@
 using System.Drawing.Drawing2D;
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 internal sealed class DarkNumeric : Control
 {
     /// <summary>The arrow strip must grow with the field, otherwise the 18px strip stays tiny

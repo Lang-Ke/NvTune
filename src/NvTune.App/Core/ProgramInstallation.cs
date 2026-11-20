@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Copies only the files belonging to the active deployment layout. Paths are supplied
 /// by the caller so installation and migration can be checked without touching Program Files.</summary>

@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// Starts, stops and detects the background task. The daemon records its PID in the install data

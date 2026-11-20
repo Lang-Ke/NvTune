@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 internal sealed partial class MainForm
 {
@@ -131,7 +131,7 @@ internal sealed partial class MainForm
         grid.RowStyles.Clear();
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(24)));
         grid.RowStyles.Add(new RowStyle(SizeType.Absolute, D(38)));
-        AddField(grid, 0, "电压上限 · mV", _mvInput);
+        AddField(grid, 0, "目标调整 · mV", _mvInput);
         AddField(grid, 1, "目标频率 · MHz", _mhzInput);
         AddField(grid, 2, "显存偏移 · MHz", _memInput);
         var apply = Theme.PrimaryButton("本次应用", (_, _) => ApplyUndervolt());

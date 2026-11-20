@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Keep driver percentage, target duty and RPM distinct. A target is not a tachometer,
 /// and missing data must not become a fabricated 0%/0 RPM.</summary>

@@ -69,12 +69,6 @@ try {
         throw "Single-file verification failed. $report"
     }
     Write-Output $report
-    $license = Invoke-AppCheck -Executable $executable -Argument '--license'
-    $expectedLicense = [IO.File]::ReadAllText((Join-Path $repoRoot 'LICENSE'))
-    if ($license.Replace("`r`n", "`n").Trim() -cne $expectedLicense.Replace("`r`n", "`n").Trim()) {
-        throw 'Embedded license does not match the complete repository LICENSE.'
-    }
-    Write-Output 'Embedded license check passed.'
 
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
     $executablePath = Join-Path $destination 'NvTuneApp.exe'

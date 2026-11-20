@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>One tuning target given as at most one of an absolute value, an offset or a percentage
 /// (the relative forms resolve against a reference the caller supplies).</summary>

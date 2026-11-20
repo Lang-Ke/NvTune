@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>
 /// The status (effective curve) buffer's record layout, recovered from the raw bytes: the record stride

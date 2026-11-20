@@ -6,7 +6,7 @@
 
 界面预览使用示例数据。
 
-NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心降压（电压上限 + 目标频率）
+NvTune 是一个 NVIDIA 显卡调校工具，提供图形化的核心降压（电压上限 + 目标频率）
 和多点风扇曲线调节。配置一次，重启后自动生效，无需常驻大体积后台。
 
 ## ✨ 功能
@@ -30,7 +30,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 
 [直接下载最新版 Windows x64 主程序](https://github.com/Lang-Ke/NvTune/releases/latest/download/NvTuneApp.exe)
 
-从 1.0.8 起，下载文件只有一个 `NvTuneApp.exe`。运行时检测由主程序自带的 .NET 启动宿主处理，原来的独立启动器已移除；主程序 DLL、依赖清单、运行时配置和完整 MIT 版权声明都已嵌入 EXE。更新记录和 SHA-256 校验值见 GitHub Release。
+从 1.0.8 起，下载文件只有一个 `NvTuneApp.exe`。运行时检测由主程序自带的 .NET 启动宿主处理，原来的独立启动器已移除；主程序 DLL、依赖清单和运行时配置都已嵌入 EXE。更新记录和 SHA-256 校验值见 GitHub Release。
 
 ### 系统要求
 
@@ -49,7 +49,7 @@ NvTune 是一个开源的 NVIDIA 显卡调校工具，提供图形化的核心�
 ## 🚀 使用
 
 1. 下载 `NvTuneApp.exe` 到任意文件夹，双击运行。
-2. 在顶部选择显卡，设置电压上限 / 目标频率 / 显存偏移。
+2. 在顶部选择显卡，设置目标调整（mV）/ 目标频率 / 显存偏移。
 3. 切换风扇模式：自动、固定转速，或拖动曲线设置温度-转速对应关系。
 4. 点 **「保存并开机应用」** —— 保存到 `C:\Program Files\NvTune`，注册开机任务，重启自动生效。
 5. 移动或删除下载的 EXE 不影响已安装的配置。
@@ -112,7 +112,7 @@ pwsh -File scripts/Publish-Release.ps1 -OutputDirectory artifacts/release
 
 输出只有 `NvTuneApp.exe`，脚本会打印其 SHA-256 校验值，并验证单文件部署和软件预览自检。无需构建独立启动器或另外打包 ZIP。
 
-主程序支持 `--version` 查询版本、`--license` 查看完整 MIT 版权声明和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
+主程序支持 `--version` 查询版本和 `--verify-package` 软件自检；自检不初始化显卡、不安装程序、不注册计划任务。
 
 ## 📁 项目结构
 
@@ -135,9 +135,3 @@ NvTune/
 
 本项目与 NVIDIA Corporation 无关。NVIDIA、GeForce、GTX、RTX 是 NVIDIA Corporation 的商标，
 此处仅用于标识兼容的硬件。
-
-## 📄 许可证
-
-[MIT](LICENSE) — 基于 [vuplea/simple-nvidia-undervolt](https://github.com/vuplea/simple-nvidia-undervolt) 派生。
-
-独立 EXE 内嵌完整许可证与版权声明，可通过 `NvTuneApp.exe --license` 查看。

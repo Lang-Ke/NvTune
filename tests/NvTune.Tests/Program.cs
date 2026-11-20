@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Diagnostics;
-using SimpleNvidiaUndervolt;
+using NvTune;
 
 internal static class Program
 {
@@ -377,7 +377,7 @@ internal static class Program
                 }
                 File.WriteAllText(Path.Combine(source, "NvTuneApp.extra.json"), "not an installation file");
                 File.WriteAllText(Path.Combine(target, "NvTuneApp.custom.json"), "preserve unknown file");
-                File.WriteAllText(Path.Combine(target, "LICENSE"), "preserve license");
+                File.WriteAllText(Path.Combine(target, "user-notes.txt"), "preserve user notes");
                 File.WriteAllText(Path.Combine(source, "data", "fan.json"), "portable old settings");
                 File.WriteAllText(Path.Combine(source, "data", "fan.gpu1.json"), "portable new settings");
                 File.WriteAllText(Path.Combine(target, "data", "fan.json"), "installed settings");
@@ -390,7 +390,7 @@ internal static class Program
                 Check(companions.All(name => File.Exists(Path.Combine(source, name))));
                 Check(!File.Exists(Path.Combine(target, "NvTuneApp.extra.json")));
                 Check(File.ReadAllText(Path.Combine(target, "NvTuneApp.custom.json")) == "preserve unknown file");
-                Check(File.ReadAllText(Path.Combine(target, "LICENSE")) == "preserve license");
+                Check(File.ReadAllText(Path.Combine(target, "user-notes.txt")) == "preserve user notes");
                 Check(File.ReadAllText(Path.Combine(target, "data", "fan.json")) == "installed settings");
                 Check(File.ReadAllText(Path.Combine(target, "data", "fan.gpu1.json")) == "portable new settings");
                 Check(File.ReadAllText(Path.Combine(target, "data", "daemon.pid")) == "123");

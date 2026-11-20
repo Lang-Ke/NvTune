@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>A process-wide hardware owner, automatically released by Windows on a crash.
 /// File sharing locks also work across Windows sessions and do not depend on async thread affinity.</summary>

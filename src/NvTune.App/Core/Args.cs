@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>Small argv parser for this CLI. Keeping argv as plain tokens lets elevation, shortcuts and
 /// the logon task pass the same command line through without a dependency on a parser library, while
@@ -157,8 +157,8 @@ internal static class Args
                 }
 
                 throw new CliError(arg.StartsWith('-')
-                    ? $"Unknown option '{arg}'. Run 'simple-nvidia-undervolt --help' for the supported options."
-                    : $"Unexpected argument '{arg}'. Run 'simple-nvidia-undervolt --help' for usage.");
+                    ? $"Unknown option '{arg}'."
+                    : $"Unexpected argument '{arg}'.");
             }
 
             if (options.ContainsKey(arg))

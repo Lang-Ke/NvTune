@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 internal sealed class MetricTile(string caption, string unit, Color accent) : Control
 {

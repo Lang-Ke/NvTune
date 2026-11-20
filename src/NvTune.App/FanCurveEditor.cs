@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>The multi-point fan curve editor. It deliberately uses the standard Windows pointer:
 /// dragging and double-clicking are enough of an affordance, so no custom cursor is set.</summary>

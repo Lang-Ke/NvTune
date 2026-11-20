@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 // Packed layouts for the NVAPI tuning structures. Field order, array sizes and Pack=8 are fixed
 // by the driver ABI; the leading uint of each top-level struct is the version word (see

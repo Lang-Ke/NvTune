@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using static System.FormattableString;
 
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>What identifies the GPU a document was captured from: the full name plus the PCI
 /// identifiers (device, partner subsystem, revision), which pin the exact board model. Identity is

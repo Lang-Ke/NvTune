@@ -1,4 +1,4 @@
-namespace SimpleNvidiaUndervolt;
+namespace NvTune;
 
 /// <summary>The applied tuning state, at the level of the knobs this tool sets: the per-anchor
 /// curve deltas and the P0 memory offset. Snapshotted at the delta level so a
